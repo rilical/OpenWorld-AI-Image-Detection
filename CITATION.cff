@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+title: "Open-World AI Image Detection with Abstention"
+message: "If you use this software, please cite it."
+type: software
+authors:
+  - family-names: Ghabayen
+    given-names: Omar
+  - family-names: Yar
+    given-names: Gorkem
+  - family-names: Almansour
+    given-names: Abdullah
+  - family-names: Xie
+    given-names: Zongchi
+  - family-names: Qu
+    given-names: Youlin
+year: 2026

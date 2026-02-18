@@ -1,0 +1,31 @@
+seed: 123
+
+deterministic: true
+
+data:
+  dataset: "commfor_small"
+  batch_size: 64
+  num_workers: 2
+  img_size: 224
+  calibration_fraction: 0.1
+
+model:
+  type: "clip_baseline"
+  clip:
+    model_name: "ViT-B-32"
+    pretrained: "openai"
+    freeze: true
+    unfreeze_last_n: null
+  head:
+    hidden_dims: [512, 256]
+    dropout: 0.1
+  dire:
+    enabled: false
+
+calibration:
+  temperature: true
+  conformal_alpha: 0.05
+  conformal_method: "split"
+
+output:
+  root: "outputs/runs"

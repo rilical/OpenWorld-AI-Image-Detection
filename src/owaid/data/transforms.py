@@ -1,0 +1,191 @@
+"""Image preprocessing and optional corruption utilities."""
+
+from __future__ import annotations
+
+import io
+from typing import Any, Callable, Dict
+
+import numpy as np
+import torch
+from PIL import Image, ImageFilter
+from torch import Tensor
+from torchvision import transforms
+
+try:
+    import open_clip
+except Exception:  # pragma: no cover
+    open_clip = None
+
+
+DEFAULT_NORMALIZATION = ([0.48145466, 0.4578275, 0.40821073], [0.26862954, 0.26130258, 0.27577711])
+
+
+def _to_tensor(sample: Any) -> Tensor:
+    """Convert common input formats to a float CHW tensor."""
+    if torch.is_tensor(sample):
+        if sample.ndim != 3:
+            raise ValueError("Tensor images must be CHW")
+        return sample.float()
+
+    if isinstance(sample, Image.Image):
+        return transforms.ToTensor()(sample)
+
+    if isinstance(sample, np.ndarray):
+        if sample.ndim == 3 and sample.shape[0] == 3:
+            tensor = torch.from_numpy(sample).float()
+            if tensor.max() > 1.0:
+                tensor = tensor / 255.0
+            return tensor
+
+        if sample.ndim == 3 and sample.shape[-1] == 3:
+            tensor = torch.from_numpy(sample).permute(2, 0, 1).float()
+            if tensor.max() > 1.0:
+                tensor = tensor / 255.0
+            return tensor
+
+        return transforms.ToTensor()(Image.fromarray(sample))
+
+    raise TypeError(f"Unsupported image type: {type(sample)!r}")
+
+
+def _jpeg_quality_transform(quality: int | None) -> Callable[[Image.Image], Image.Image] | None:
+    """Create a transform that re-encodes a PIL image as JPEG."""
+    if quality is None:
+        return None
+
+    def _fn(img: Image.Image) -> Image.Image:
+        buffer = io.BytesIO()
+        q = int(np.clip(quality, 1, 100))
+        img.save(buffer, format="JPEG", quality=q)
+        buffer.seek(0)
+        with Image.open(buffer) as decoded:
+            return decoded.convert("RGB")
+
+    return _fn
+
+
+def _gaussian_blur_transform(sigma: float | None) -> Callable[[Image.Image], Image.Image] | None:
+    """Create a PIL gaussian blur transform."""
+    if sigma is None:
+        return None
+
+    return lambda img: img.filter(ImageFilter.GaussianBlur(radius=float(sigma)))
+
+
+def _get_model_norm(cfg_dict: Dict[str, Any]) -> tuple[list[float], list[float]]:
+    """Read OpenCLIP normalization from the selected model when available."""
+    if open_clip is None:
+        return DEFAULT_NORMALIZATION
+
+    model_cfg = cfg_dict.get("model", cfg_dict)
+    if not isinstance(model_cfg, dict):
+        return DEFAULT_NORMALIZATION
+
+    clip_cfg = model_cfg.get("clip", model_cfg.get("backbone", {}))
+    if not isinstance(clip_cfg, dict):
+        clip_cfg = {}
+
+    model_name = str(clip_cfg.get("model_name", "ViT-B-32"))
+    pretrained = str(clip_cfg.get("pretrained", "openai"))
+
+    try:
+        _, _, preprocess = open_clip.create_model_and_transforms(model_name=model_name, pretrained=pretrained)
+    except Exception:
+        return DEFAULT_NORMALIZATION
+
+    for t in preprocess.transforms:
+        if isinstance(t, transforms.Normalize):
+            return (list(t.mean), list(t.std))
+    return DEFAULT_NORMALIZATION
+
+
+def build_clip_transform(cfg: Any, train: bool) -> Callable[[Any], Tensor]:
+    """Build a CLIP-compatible transform pipeline.
+
+    Examples
+    --------
+    >>> cfg = {"data": {"img_size": 224, "transforms": {"resize_shorter": 224}}, "deterministic": True}
+    >>> tx = build_clip_transform(cfg, train=False)
+    >>> hasattr(tx, "__call__")
+    True
+    """
+    cfg_dict = cfg if isinstance(cfg, dict) else vars(cfg)
+    data_cfg = cfg_dict.get("data", cfg_dict) if isinstance(cfg_dict, dict) else {}
+    if not isinstance(data_cfg, dict):
+        data_cfg = {}
+
+    img_size = int(data_cfg.get("img_size", 224))
+    transform_cfg = data_cfg.get("transforms", {}) if isinstance(data_cfg, dict) else {}
+    if transform_cfg is None:
+        transform_cfg = {}
+
+    deterministic = bool(cfg_dict.get("deterministic", False))
+    use_corruptions = bool(transform_cfg.get("use_corruptions", False))
+    resize_shorter = transform_cfg.get("resize_shorter")
+    center_crop = bool(transform_cfg.get("center_crop", False))
+    jpeg_quality = transform_cfg.get("jpeg_quality")
+    blur_sigma = transform_cfg.get("blur_sigma")
+
+    mean, std = _get_model_norm(cfg_dict)
+
+    steps: list[Callable[[Any], Any]] = []
+
+    if resize_shorter is not None:
+        side = int(resize_shorter)
+        steps.append(transforms.Resize((side, side)))
+        if center_crop:
+            steps.append(transforms.CenterCrop(img_size))
+        else:
+            steps.append(transforms.Resize((img_size, img_size)))
+    else:
+        steps.append(transforms.Resize((img_size, img_size)))
+
+    if use_corruptions:
+        quality = jpeg_quality
+        sigma = blur_sigma
+
+        if train and not deterministic:
+            if quality is not None:
+                q = int(quality)
+                # draw from [max(1, int(0.5*q)), q] with global RNG.
+                quality = int(np.random.randint(max(1, int(0.5 * q)), q + 1))
+            if sigma is not None:
+                sigma = float(np.random.uniform(0.0, float(sigma)))
+
+        quality_fn = _jpeg_quality_transform(None if quality is None else int(quality))
+        if quality_fn is not None:
+            steps.append(transforms.Lambda(quality_fn))
+
+        blur_fn = _gaussian_blur_transform(None if sigma is None else float(sigma))
+        if blur_fn is not None:
+            steps.append(transforms.Lambda(blur_fn))
+
+    steps.append(transforms.ToTensor())
+    steps.append(transforms.Normalize(mean=mean, std=std))
+
+    return transforms.Compose(steps)
+
+
+if __name__ == "__main__":
+    sample = Image.fromarray(np.random.default_rng(0).integers(0, 256, size=(256, 256, 3), dtype=np.uint8))
+    cfg = {
+        "data": {
+            "img_size": 224,
+            "transforms": {
+                "resize_shorter": 224,
+                "center_crop": True,
+                "use_corruptions": True,
+                "jpeg_quality": 90,
+                "blur_sigma": 1.5,
+            },
+        },
+        "deterministic": True,
+    }
+
+    for train in [False, True]:
+        tx = build_clip_transform(cfg, train=train)
+        out = tx(sample)
+        print(
+            f"train={train} shape={tuple(out.shape)} min={out.min():.4f} max={out.max():.4f}"
+            f" mean={out.mean():.4f} std={out.std(unbiased=False):.4f}"
+        )

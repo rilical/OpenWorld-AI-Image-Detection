@@ -1,0 +1,15 @@
+seed: 123
+deterministic: true
+
+data:
+  dataset: "raid"
+  batch_size: 64
+  num_workers: 2
+  img_size: 224
+  split: "test"
+
+eval:
+  save_predictions: true
+
+output:
+  root: "outputs/runs"

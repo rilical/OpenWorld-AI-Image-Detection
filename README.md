@@ -1,6 +1,6 @@
 # Open‑World AI Image Detection with Abstention (CMU ECE 18‑786)
 
-**Repository**: `ece18786-openworld-agid-abstention` (or rename as needed)
+**Repository**: 'OpenWorld-AI-Image-Detection'
 
 **Authors**
 - Omar Ghabayen — oghabaye@andrew.cmu.edu

@@ -59,7 +59,8 @@ def main() -> None:
         return
 
     set_seed(int(cfg.get("seed", 0)), deterministic=bool(cfg.get("deterministic", True)))
-    run_dir = make_run_dir(cfg)
+    output_cfg = cfg.get("output", {})
+    run_dir = make_run_dir(output_cfg.get("root", "outputs/runs"), output_cfg.get("run_name"))
     cfg.setdefault("output", {})["run_dir"] = run_dir
     save_resolved_config(run_dir, cfg)
     write_meta(run_dir, cfg)

@@ -23,6 +23,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--config", required=True)
     p.add_argument("--run", required=True)
     p.add_argument("--device", default="cpu")
+    p.add_argument(
+        "--evaluation-mode",
+        choices=["all", "forced", "temperature", "threshold", "conformal"],
+        default="all",
+    )
+    p.add_argument("--tau", type=float, default=0.9, help="Threshold for threshold abstention")
     p.add_argument("--opts", nargs="*")
     return p.parse_args()
 
@@ -37,6 +43,8 @@ def main() -> None:
         artifact_name="raid",
         device=args.device,
         save_predictions=True,
+        evaluation_mode=args.evaluation_mode,
+        tau=args.tau,
     )
 
 

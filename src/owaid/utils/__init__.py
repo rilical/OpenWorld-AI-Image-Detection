@@ -13,7 +13,7 @@ from .config import (
 )
 from .run import make_run_dir, save_resolved_config, write_meta
 from .logging import JsonlLogger, read_json, write_json, write_yaml
-from .paths import ensure_dir, make_run_dir as make_run_dir_compat, require_env, resolve_path
+from .paths import ensure_dir, make_run_dir as make_run_dir_compat, require_env, resolve_path, stable_sample_id
 from .seed import set_seed
 
 __all__ = [
@@ -29,6 +29,7 @@ __all__ = [
     "require_env",
     "ensure_dir",
     "resolve_path",
+    "stable_sample_id",
     "make_run_dir",
     "make_run_dir_compat",
     "write_meta",

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import Any, Dict
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+
+from ..utils.logging import read_json, write_json
 
 
 def _collect_logits_labels(model, loader, device) -> tuple[torch.Tensor, torch.Tensor]:
@@ -60,3 +62,31 @@ def fit_temperature(model: Any, loader, device: str = "cpu") -> Dict[str, float]
         "nll_after": nll_after,
     }
 
+
+def apply_temperature(logits: torch.Tensor, temperature: float | Dict[str, float]) -> torch.Tensor:
+    """Apply a scalar temperature to logits."""
+    if isinstance(temperature, dict):
+        value = float(temperature.get("temperature", 1.0))
+    else:
+        value = float(temperature)
+    value = max(value, 1e-8)
+    return logits / value
+
+
+def save_temperature_artifact(path: str, artifact: Dict[str, float]) -> None:
+    """Persist a temperature artifact as JSON."""
+    write_json(path, artifact)
+
+
+def load_temperature_artifact(path: str) -> Dict[str, float]:
+    """Load a temperature artifact from JSON."""
+    data = read_json(path)
+    if not isinstance(data, dict) or "temperature" not in data:
+        raise ValueError(f"Invalid temperature artifact: {path}")
+    return data
+
+
+if __name__ == "__main__":
+    logits = torch.tensor([[2.0, 0.5], [0.1, 1.9]])
+    scaled = apply_temperature(logits, 2.0)
+    print({"input_shape": list(logits.shape), "scaled_shape": list(scaled.shape)})

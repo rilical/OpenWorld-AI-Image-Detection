@@ -14,6 +14,10 @@ data:
   num_workers: 2
   img_size: 224
   calibration_fraction: 0.1
+  max_train_samples: null
+  max_eval_samples: null
+  streaming: false
+  shuffle_buffer: 100
   transforms:
     use_corruptions: false
     jpeg_quality: null

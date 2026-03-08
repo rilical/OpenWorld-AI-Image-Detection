@@ -40,6 +40,12 @@ This project is designed as a reliability-first detector benchmark with explicit
 
 Standard detector pipelines often force binary decisions, which hides uncertainty. In realistic deployment, abstention is often the correct operational action when uncertainty or domain shift is high. This repo provides a reusable scaffold that makes abstention first-class and reproducible.
 
+## Quick links
+
+- Dataset setup: `DATASETS.md`
+- Report assets: `reports/`
+- Agent guidance: `AGENTS.md`
+
 ## Key contributions and ablations
 
 1. **Baseline detector**
@@ -67,6 +73,8 @@ Standard detector pipelines often force binary decisions, which hides uncertaint
    - Cache-first design for practical compute management
 
 ## Data and reality checks (important)
+
+> See [DATASETS.md](DATASETS.md) for full dataset acquisition instructions, env vars, and folder structures.
 
 ### CommunityForensics-Small (CFS)
 
@@ -127,12 +135,28 @@ A practical starting recipe:
 ## Repository layout
 
 ```text
-ece18786-openworld-agid-abstention/
+OpenWorld-AI-Image-Detection/
   README.md
   requirements.txt
+  Makefile
+  PLANS.md
+  DATASETS.md
+  IMPLEMENTATION_CHECKLIST.md
+  AGENTS.md
   .gitignore
   LICENSE
   CITATION.cff
+
+  .agents/
+    skills/
+      bootstrap-repo/SKILL.md
+      dataset-loader/SKILL.md
+      baseline-detector/SKILL.md
+      calibration-conformal/SKILL.md
+      openworld-eval/SKILL.md
+      publication-plots/SKILL.md
+      report-writer/SKILL.md
+      demo-ui/SKILL.md
 
   assets/
     figures/
@@ -182,6 +206,12 @@ ece18786-openworld-agid-abstention/
         classification.py
         calibration_metrics.py
         selective.py
+        bootstrap.py
+
+      inference/
+        __init__.py
+        io.py
+        predictor.py
 
       utils/
         __init__.py
@@ -189,7 +219,7 @@ ece18786-openworld-agid-abstention/
         logging.py
         seed.py
         paths.py
-        run.py (if separated in your fork)
+        run.py
 
   scripts/
     train_baseline.py
@@ -201,6 +231,9 @@ ece18786-openworld-agid-abstention/
     eval_raid.py
     eval_aria.py
     make_plots.py
+    generate_summary.py
+    predict_image.py
+    cache_residuals.py
 
   notebooks/
     01_data_exploration.ipynb
@@ -217,6 +250,13 @@ ece18786-openworld-agid-abstention/
     plots/
       .gitkeep
 
+  reports/
+    figures/
+      .gitkeep
+    tables/
+      .gitkeep
+    paper.md
+
   tests/
     test_metrics.py
     test_conformal.py
@@ -226,34 +266,37 @@ ece18786-openworld-agid-abstention/
       ci.yml
 ```
 
-> If you want a cleaner one-command bootstrap, see the “Quick bootstrap” section below.
-
 ## Quick bootstrap
 
 ```bash
 # Create base repository structure
 mkdir -p assets/figures assets/examples/example_images \
-  configs src/owaid/{data,models,training,calibration,metrics,utils} \
-  scripts notebooks demo outputs/runs outputs/plots tests .github/workflows
+  configs src/owaid/{data,models,training,calibration,metrics,inference,utils} \
+  scripts notebooks demo outputs/runs outputs/plots reports/{figures,tables} \
+  tests .github/workflows .agents/skills
 
 # Initialize package
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
 pip install -r requirements.txt
 
 # Copy this scaffold into git
- git init
- git branch -M main
+git init
+git branch -M main
+
+# Verify everything compiles and tests pass
+make smoke
 ```
 
 ## Setup
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
 pip install -r requirements.txt
+pip install -e .
 ```
 
 Install PyTorch for your platform from https://pytorch.org/get-started/locally/.
@@ -263,6 +306,13 @@ If using large datasets, point caches to dedicated disk:
 ```bash
 export HF_HOME=/path/to/big_disk/hf
 export HF_DATASETS_CACHE=/path/to/big_disk/hf/datasets
+```
+
+## Smoke checks
+
+```bash
+make smoke
+pytest -q
 ```
 
 ## Configs and runtime contract
@@ -280,33 +330,135 @@ Core schema (high level):
 
 ## Pipeline (recommended order)
 
-1. Train baseline
+1. **Train baseline**
 ```bash
-python scripts/train_baseline.py --config configs/baseline_clip.yaml
+make train-baseline
 ```
 
-2. Fit temperature on calibration split
+2. **Fit temperature on calibration split**
 ```bash
-python scripts/calibrate_temperature.py --config configs/calibration.yaml --run outputs/runs/<run_id>
+make calibrate RUN=outputs/runs/<run_id>
 ```
 
-3. Build conformal thresholds
+3. **Build conformal thresholds**
 ```bash
-python scripts/build_conformal.py --config configs/calibration.yaml --run outputs/runs/<run_id> --temperature outputs/runs/<run_id>/calibration/temperature.json
+make conformal RUN=outputs/runs/<run_id>
 ```
 
-4. Evaluate open-world sets
+4. **Evaluate with the four comparison modes**
 ```bash
-python scripts/eval_vct2.py --config configs/eval_vct2.yaml --run outputs/runs/<run_id>
-python scripts/eval_raid.py --config configs/eval_raid.yaml --run outputs/runs/<run_id>
-python scripts/eval_aria.py --config configs/eval_aria.yaml --run outputs/runs/<run_id>
-python scripts/eval_commfor.py --config configs/eval_commfor.yaml --run outputs/runs/<run_id>
+make eval-commfor RUN=outputs/runs/<run_id>
+make eval-vct2   RUN=outputs/runs/<run_id>
+make eval-raid   RUN=outputs/runs/<run_id>
+make eval-aria   RUN=outputs/runs/<run_id>
 ```
 
-5. Plot reliability/risk-coverage
+5. **Plot reliability and risk-coverage**
 ```bash
-python scripts/make_plots.py --runs outputs/runs --out outputs/plots
+make plots   RUN=outputs/runs/<run_id>
+make summary RUN=outputs/runs/<run_id>
 ```
+
+6. **Optional DIRE cache + training path**
+```bash
+make cache-residuals RUN=outputs/runs/<run_id>
+python3 scripts/train_with_dire.py --config configs/dire_fusion.yaml
+```
+
+7. **Local prediction and demo**
+```bash
+make predict RUN=outputs/runs/<run_id> IMAGE=path/to/image.png
+make demo    RUN=outputs/runs/<run_id>
+```
+
+<details>
+<summary>Raw commands (without Make)</summary>
+
+```bash
+# 1. Train baseline
+python3 scripts/train_baseline.py --config configs/baseline_clip.yaml
+
+# 2. Fit temperature
+python3 scripts/calibrate_temperature.py \
+  --config configs/calibration.yaml \
+  --ckpt outputs/runs/<run_id>/checkpoints/best.pt \
+  --run outputs/runs/<run_id>
+
+# 3. Build conformal thresholds
+python3 scripts/build_conformal.py \
+  --config configs/calibration.yaml \
+  --ckpt outputs/runs/<run_id>/checkpoints/best.pt \
+  --run outputs/runs/<run_id> \
+  --temperature outputs/runs/<run_id>/calibration/temperature.json
+
+# 4. Evaluate
+python3 scripts/eval_commfor.py --config configs/eval_commfor.yaml --run outputs/runs/<run_id> --evaluation-mode all
+python3 scripts/eval_vct2.py --config configs/eval_vct2.yaml --run outputs/runs/<run_id> --evaluation-mode all
+python3 scripts/eval_raid.py --config configs/eval_raid.yaml --run outputs/runs/<run_id> --evaluation-mode all
+python3 scripts/eval_aria.py --config configs/eval_aria.yaml --run outputs/runs/<run_id> --evaluation-mode all
+
+# 5. Plots and summary
+python3 scripts/make_plots.py --runs outputs/runs --out reports/figures --style publication
+python3 scripts/generate_summary.py --run outputs/runs/<run_id> --out reports/results_summary.md
+
+# 6. DIRE cache + training
+python3 scripts/cache_residuals.py --config configs/dire_fusion.yaml --run outputs/runs/<run_id>
+python3 scripts/train_with_dire.py --config configs/dire_fusion.yaml
+
+# 7. Predict and demo
+python3 scripts/predict_image.py --run outputs/runs/<run_id> --image path/to/image.png
+python3 demo/app.py --run outputs/runs/<run_id>
+```
+
+</details>
+
+## Makefile targets
+
+```
+make smoke          # compileall + pytest
+make test           # pytest -q
+make train-baseline # train CLIP detector
+make calibrate      # fit temperature scaling
+make conformal      # build conformal thresholds
+make eval-commfor   # evaluate on CommunityForensics
+make eval-vct2      # evaluate on VCT2
+make eval-raid      # evaluate on RAID
+make eval-aria      # evaluate on ARIA
+make plots          # publication-quality figures → reports/figures/
+make demo           # launch Gradio UI
+make summary        # generate reports/results_summary.md
+make predict        # single-image inference
+make cache-residuals # cache DIRE residuals offline
+```
+
+> Configurable via `RUN=outputs/runs/<run_id>`, `CONFIG=configs/baseline_clip.yaml`, `DEVICE=cpu|cuda`.
+
+## Interactive demo
+
+The Gradio Blocks interface accepts an image upload and returns a tri-state label (AI/Real/Abstain), confidence score, and prediction set. Launch with:
+
+```bash
+make demo RUN=outputs/runs/<run_id>
+# or directly:
+python3 demo/app.py --run outputs/runs/<run_id> --device cpu
+```
+
+For non-interactive single-image inference:
+
+```bash
+python3 demo/app.py --run outputs/runs/<run_id> --image path/to/image.jpg
+```
+
+## Evaluation modes
+
+Every evaluation script can compare four decision modes:
+
+1. `forced`: raw argmax without temperature scaling.
+2. `temperature`: argmax after temperature scaling.
+3. `threshold`: abstain when max calibrated confidence is below `tau`.
+4. `conformal`: split conformal prediction sets mapped to `{AI, Real, Abstain}`.
+
+Open-world empirical coverage on VCT2, RAID, and ARIA should be read as an observed metric under distribution shift, not as an i.i.d. coverage guarantee.
 
 ## Required outputs per run
 
@@ -315,8 +467,9 @@ Each run writes to `outputs/runs/<run_id>/`:
 - `meta.json`
 - `checkpoints/best.pt`, `checkpoints/last.pt`
 - `calibration/temperature.json`, `calibration/conformal.json`
+- `splits/split_manifest.json` -- stratified split indices with SHA-256 integrity hash
 - `eval/<dataset>/metrics.json`
-- optional `eval/<dataset>/predictions.parquet`
+- `eval/<dataset>/predictions.parquet`
 - `logs/train.jsonl`, `logs/eval.jsonl`
 
 ## Evaluation protocol
@@ -328,6 +481,9 @@ We evaluate:
 - risk-coverage and AURC
 - abstention rate
 - selective/answered accuracy
+- bootstrap confidence intervals (AUROC, selective accuracy)
+- empirical conformal coverage (overall + class-conditional + per-group)
+- worst-group selective accuracy (per-generator breakdown)
 
 Baseline methods compared per run:
 
@@ -335,6 +491,7 @@ Baseline methods compared per run:
 2. Temperature-scaled forced decision
 3. Confidence-threshold abstention (`max_softmax < tau`)
 4. Split conformal (and optional Mondrian)
+5. Threshold abstention (`max_softmax < τ`, via `--abstention-method threshold --tau 0.9`)
 
 ## Transform policy
 
@@ -351,6 +508,12 @@ Use deterministic mode (`deterministic: true`) to disable stochastic transforms 
 - CFS licensing (CC BY-NC-SA) implies non-commercial/research constraints.
 - Do not use outputs as legal evidence; the system is a reliability and screening tool.
 - Report environment variables and exact command lines with every artifact bundle.
+
+## Development
+
+- [PLANS.md](PLANS.md) -- project roadmap and milestone tracking
+- [AGENTS.md](AGENTS.md) -- agent skill descriptions and orchestration guidance
+- [IMPLEMENTATION_CHECKLIST.md](IMPLEMENTATION_CHECKLIST.md) -- detailed implementation status checklist
 
 ## Citation
 

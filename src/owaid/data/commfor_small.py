@@ -8,6 +8,8 @@ from typing import Any, Callable, Dict, Optional
 import torch
 from torch.utils.data import Dataset, IterableDataset
 
+from ..utils.paths import stable_sample_id
+
 
 class CommunityForensicsSmallDataset(Dataset):
     """Wrapper over a Hugging Face CommunityForensics split."""
@@ -47,8 +49,14 @@ class CommunityForensicsSmallDataset(Dataset):
         raise ValueError(f"Could not parse label from sample: {row}")
 
     def _extract_meta(self, row: Dict[str, Any], index: int) -> Dict[str, Any]:
+        sample_id = stable_sample_id(
+            "commfor",
+            provided_id=row.get("id", row.get("image_id")),
+            split=self.split,
+            index=index,
+        )
         return {
-            "id": row.get("id", row.get("image_id", index)),
+            "id": sample_id,
             "source_dataset": "CommunityForensics-Small",
             "split": self.split,
             "generator": row.get("generator"),

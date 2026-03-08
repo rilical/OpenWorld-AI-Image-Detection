@@ -8,6 +8,7 @@ data:
   img_size: 224
   calibration_fraction: 0.1
   split: "validation"
+  max_eval_samples: null
 
 eval:
   save_predictions: true

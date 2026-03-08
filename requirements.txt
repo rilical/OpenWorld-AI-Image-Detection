@@ -23,8 +23,8 @@ huggingface-hub>=0.20
 # Plotting
 matplotlib>=3.7
 
-# Optional: demo UI
-# gradio>=4.0
+# Demo UI
+gradio>=4.0
 
 # Optional: DIRE branch (enable only when you implement it)
 # diffusers>=0.25
@@ -33,5 +33,5 @@ matplotlib>=3.7
 # safetensors>=0.4
 
 # Optional: dev/test tooling
-# pytest>=7.4
+pytest>=8.0
 # ruff>=0.2

@@ -8,6 +8,8 @@ from typing import Any, Dict, Iterable
 import numpy as np
 import torch
 
+from ..utils.logging import read_json, write_json
+
 
 def _scores_from_probs(probs: np.ndarray, labels: np.ndarray) -> np.ndarray:
     return 1.0 - probs[np.arange(len(labels)), labels]
@@ -80,3 +82,16 @@ def prediction_set_from_probs(probs: np.ndarray | torch.Tensor, conformal: Dict[
                 included.append(c)
         sets.append(included)
     return sets
+
+
+def save_conformal_artifact(path: str, artifact: Dict[str, Any]) -> None:
+    """Persist a conformal artifact as JSON."""
+    write_json(path, artifact)
+
+
+def load_conformal_artifact(path: str) -> Dict[str, Any]:
+    """Load a conformal artifact from JSON."""
+    data = read_json(path)
+    if not isinstance(data, dict) or "method" not in data:
+        raise ValueError(f"Invalid conformal artifact: {path}")
+    return data

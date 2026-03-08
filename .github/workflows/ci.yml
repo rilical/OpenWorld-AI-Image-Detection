@@ -11,6 +11,7 @@ jobs:
           python-version: "3.10"
       - run: python -m pip install -U pip
       - run: pip install -r requirements.txt
+      - run: pip install -e .
       - run: python3 -m compileall src
       - name: Run script entrypoint smoke checks
         run: |
@@ -22,5 +23,7 @@ jobs:
           python3 scripts/eval_vct2.py --help
           python3 scripts/eval_raid.py --help
           python3 scripts/eval_aria.py --help
+          python3 scripts/cache_residuals.py --help
+          python3 scripts/predict_image.py --help
           python3 scripts/make_plots.py --help
       - run: pytest -q

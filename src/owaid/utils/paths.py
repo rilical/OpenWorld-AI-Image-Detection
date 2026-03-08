@@ -32,6 +32,37 @@ def resolve_path(*parts: str) -> str:
     return str(Path(os.path.join(*expanded)).resolve())
 
 
+def stable_sample_id(
+    dataset_name: str,
+    *,
+    provided_id: Any | None = None,
+    path: str | Path | None = None,
+    split: str | None = None,
+    index: int | None = None,
+    root: str | Path | None = None,
+) -> str:
+    """Build a deterministic sample identifier for caching and prediction export."""
+    if provided_id not in (None, ""):
+        return str(provided_id)
+
+    if path is not None:
+        path_obj = Path(path)
+        relative = path_obj
+        if root is not None:
+            root_obj = Path(root)
+            try:
+                relative = path_obj.relative_to(root_obj)
+            except ValueError:
+                relative = path_obj
+        return f"{dataset_name}:{relative.as_posix()}"
+
+    if split is not None and index is not None:
+        return f"{dataset_name}:{split}:{index}"
+    if index is not None:
+        return f"{dataset_name}:{index}"
+    raise ValueError(f"Unable to derive stable sample id for dataset '{dataset_name}'")
+
+
 def make_run_dir(cfg: Dict[str, Any] | Any) -> str:
     """Backward-compatible run-dir helper used by existing CLI scripts.
 

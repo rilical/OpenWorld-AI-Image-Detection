@@ -52,3 +52,42 @@ def ece(probs: Any, labels: Any, n_bins: int = 15):
         },
     }
     return ece_val, payload
+
+
+def empirical_conformal_coverage(
+    prediction_sets: list[list[int]],
+    labels: Any,
+    group_ids: Any | None = None,
+) -> Dict[str, Any]:
+    """Fraction of samples where true label is in the prediction set.
+
+    Returns overall coverage, class-conditional coverage, and optionally per-group coverage.
+    """
+    labels_np = np.asarray(labels)
+    n = len(labels_np)
+    if n == 0:
+        return {"overall": 0.0, "class_conditional": {}, "per_group": {}}
+
+    covered = np.array([int(labels_np[i]) in prediction_sets[i] for i in range(n)])
+
+    result: Dict[str, Any] = {"overall": float(covered.mean())}
+
+    # Class-conditional coverage
+    class_cov = {}
+    for c in np.unique(labels_np):
+        mask = labels_np == c
+        if mask.sum() > 0:
+            class_cov[str(int(c))] = float(covered[mask].mean())
+    result["class_conditional"] = class_cov
+
+    # Per-group coverage
+    if group_ids is not None:
+        groups = np.asarray(group_ids)
+        per_group = {}
+        for g in np.unique(groups):
+            mask = groups == g
+            if mask.sum() > 0:
+                per_group[str(g)] = float(covered[mask].mean())
+        result["per_group"] = per_group
+
+    return result

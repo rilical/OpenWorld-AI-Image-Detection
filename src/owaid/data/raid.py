@@ -11,10 +11,12 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from PIL import Image
-from torch.utils.data import Dataset
+import torch
+from torch.utils.data import DataLoader, Dataset
 
 from .transforms import _to_tensor
-from ..utils.paths import require_env
+from .transforms import build_clip_transform
+from ..utils.paths import stable_sample_id
 
 
 class RAIDDataset(Dataset):
@@ -37,8 +39,8 @@ class RAIDDataset(Dataset):
             )
 
     def _load_records(self, data_root: str | None):
-        root = Path(data_root or require_env("RAID_ROOT"))
-        if root.exists():
+        root = Path(data_root).expanduser().resolve() if data_root else None
+        if root is not None and root.exists():
             local_records = self._load_local_root(root)
             if local_records:
                 return local_records
@@ -49,9 +51,21 @@ class RAIDDataset(Dataset):
             ds = load_dataset("OwensLab/RAID", split=self.split)
             return [dict(r) for r in ds]
         except Exception as exc:
+            env_root = Path(Path.home())  # sentinel, replaced below if env exists
+            env_root_value = None
+            import os
+
+            env_root_value = os.environ.get("RAID_ROOT")
+            if env_root_value:
+                env_root = Path(env_root_value).expanduser().resolve()
+                if env_root.exists():
+                    local_records = self._load_local_root(env_root)
+                    if local_records:
+                        return local_records
             raise RuntimeError(
-                "RAID data is not available locally and Hugging Face fetch failed. "
-                "Set RAID_ROOT or ensure OwensLab/RAID is accessible."
+                "RAID data is not available from Hugging Face and no usable local fallback was found. "
+                "Set RAID_ROOT or pass data.raid_root to a populated local dataset path, "
+                "or ensure OwensLab/RAID is accessible."
             ) from exc
 
     def _load_local_root(self, root: Path):
@@ -64,7 +78,7 @@ class RAIDDataset(Dataset):
             if class_dir.exists():
                 for ext in ["*.jpg", "*.jpeg", "*.png", "*.webp", "*.bmp"]:
                     for path in class_dir.rglob(ext):
-                        records.append({"path": str(path), "label": int(label), "id": str(path)})
+                        records.append({"path": str(path), "label": int(label), "root": str(root)})
 
         if records:
             return records
@@ -87,7 +101,7 @@ class RAIDDataset(Dataset):
                 continue
             for ext in ["*.jpg", "*.jpeg", "*.png", "*.webp", "*.bmp"]:
                 for path in class_dir.rglob(ext):
-                    records.append({"path": str(path), "label": int(label), "id": str(path)})
+                    records.append({"path": str(path), "label": int(label), "root": str(root)})
 
         return records
 
@@ -111,9 +125,43 @@ class RAIDDataset(Dataset):
             "image": tensor,
             "label": label,
             "meta": {
-                "id": row.get("id", row.get("image_id", idx)),
+                "id": stable_sample_id(
+                    "raid",
+                    provided_id=row.get("id", row.get("image_id")),
+                    path=row.get("path"),
+                    split=self.split,
+                    index=idx,
+                    root=row.get("root"),
+                ),
                 "source_dataset": "RAID",
                 "split": self.split,
                 "path": row.get("path"),
+                "generator": row.get("generator"),
+                "pair_id": row.get("pair_id", row.get("source_id")),
+                "variant": row.get("variant"),
+                "is_adversarial": row.get("is_adversarial"),
             },
         }
+
+
+def build_raid_dataloader(cfg: Dict[str, Any] | Any) -> DataLoader:
+    """Build a RAID evaluation dataloader from config."""
+    cfg_dict = cfg if isinstance(cfg, dict) else vars(cfg)
+    data_cfg = cfg_dict.get("data", cfg_dict)
+    transform = build_clip_transform(cfg_dict, train=False)
+    dataset = RAIDDataset(
+        split=data_cfg.get("split", "test"),
+        transform=transform,
+        data_root=data_cfg.get("raid_root"),
+    )
+    return DataLoader(
+        dataset,
+        batch_size=int(data_cfg.get("batch_size", 32)),
+        shuffle=False,
+        num_workers=max(0, int(data_cfg.get("num_workers", 2))),
+        pin_memory=torch.cuda.is_available(),
+        drop_last=False,
+    )
+
+
+__all__ = ["RAIDDataset", "build_raid_dataloader"]

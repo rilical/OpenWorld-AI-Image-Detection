@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List
 
 import numpy as np
+
+from .bootstrap import bootstrap_ci
 
 
 def risk_coverage(confidence: Iterable[float], correct_mask: Iterable[bool]) -> Dict[str, List[float]]:
@@ -59,3 +61,45 @@ def selective_accuracy(correct_mask: Iterable[bool], answered_mask: Iterable[boo
     if ans.sum() == 0:
         return 0.0
     return float((corr & ans).sum() / ans.sum())
+
+
+def worst_group_selective_accuracy(
+    correct_mask: Iterable[bool],
+    answered_mask: Iterable[bool],
+    group_ids: Iterable[str],
+) -> Dict[str, Any]:
+    """Selective accuracy per group; returns worst group and per-group breakdown."""
+    corr = np.asarray(correct_mask).astype(bool)
+    ans = np.asarray(answered_mask).astype(bool)
+    groups = np.asarray(group_ids)
+
+    per_group: Dict[str, float] = {}
+    for g in np.unique(groups):
+        mask = groups == g
+        g_ans = ans[mask]
+        g_corr = corr[mask]
+        if g_ans.sum() == 0:
+            per_group[str(g)] = 0.0
+        else:
+            per_group[str(g)] = float((g_corr & g_ans).sum() / g_ans.sum())
+
+    if not per_group:
+        return {"worst": 0.0, "worst_group": "", "per_group": {}}
+
+    worst_group = min(per_group, key=per_group.get)
+    return {
+        "worst": per_group[worst_group],
+        "worst_group": worst_group,
+        "per_group": per_group,
+    }
+
+
+__all__ = [
+    "risk_coverage",
+    "aurc",
+    "coverage",
+    "abstain_rate",
+    "selective_accuracy",
+    "worst_group_selective_accuracy",
+    "bootstrap_ci",
+]

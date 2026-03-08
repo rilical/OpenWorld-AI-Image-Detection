@@ -6,10 +6,12 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from PIL import Image
-from torch.utils.data import Dataset
+import torch
+from torch.utils.data import DataLoader, Dataset
 
 from .transforms import _to_tensor
-from ..utils.paths import require_env
+from .transforms import build_clip_transform
+from ..utils.paths import require_env, stable_sample_id
 
 
 class ARIADataset(Dataset):
@@ -52,7 +54,7 @@ class ARIADataset(Dataset):
             "image": tensor,
             "label": 0,
             "meta": {
-                "id": str(path),
+                "id": stable_sample_id("aria", path=path, root=self.data_root),
                 "source_dataset": "ARIA",
                 "split": self.split,
                 "path": str(path),
@@ -61,4 +63,24 @@ class ARIADataset(Dataset):
         }
 
 
-__all__ = ["ARIADataset"]
+def build_aria_dataloader(cfg: Dict[str, Any] | Any) -> DataLoader:
+    """Build an ARIA evaluation dataloader from config."""
+    cfg_dict = cfg if isinstance(cfg, dict) else vars(cfg)
+    data_cfg = cfg_dict.get("data", cfg_dict)
+    transform = build_clip_transform(cfg_dict, train=False)
+    dataset = ARIADataset(
+        split=data_cfg.get("split", "test"),
+        transform=transform,
+        data_root=data_cfg.get("aria_root"),
+    )
+    return DataLoader(
+        dataset,
+        batch_size=int(data_cfg.get("batch_size", 32)),
+        shuffle=False,
+        num_workers=max(0, int(data_cfg.get("num_workers", 2))),
+        pin_memory=torch.cuda.is_available(),
+        drop_last=False,
+    )
+
+
+__all__ = ["ARIADataset", "build_aria_dataloader"]

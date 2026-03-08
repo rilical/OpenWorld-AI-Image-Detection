@@ -19,6 +19,13 @@ outputs/plots/*
 !outputs/runs/.gitkeep
 !outputs/plots/.gitkeep
 
+# Reports (generated)
+reports/figures/*
+reports/tables/*
+reports/results_summary.md
+!reports/figures/.gitkeep
+!reports/tables/.gitkeep
+
 # Data
 data/*
 !data/.gitkeep

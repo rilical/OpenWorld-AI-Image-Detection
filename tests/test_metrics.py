@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from owaid.metrics.classification import auroc, tpr_at_fpr
+from owaid.metrics.classification import auroc, auroc_metadata, tpr_at_fpr
 from owaid.metrics.calibration_metrics import ece
 from owaid.metrics.selective import risk_coverage, selective_accuracy
 
@@ -18,6 +18,12 @@ def test_tpr_at_fpr_one_percent():
     y_score = [0.05, 0.1, 0.9, 0.95]
     value = tpr_at_fpr(y_true, y_score, fpr=0.01)
     assert value <= 1.0
+
+
+def test_auroc_metadata_marks_single_class_as_undefined():
+    meta = auroc_metadata([0, 0, 0], [0.1, 0.2, 0.3])
+    assert meta["defined"] is False
+    assert meta["value"] is None
 
 
 def test_ece_sanity_low_for_perfect_calibration():

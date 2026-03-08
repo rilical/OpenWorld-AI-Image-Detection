@@ -3,11 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
-from datetime import datetime
-import platform
-import socket
-import subprocess
 from pathlib import Path
 import sys
 
@@ -19,75 +14,69 @@ from _bootstrap import bootstrap_repo_source
 
 bootstrap_repo_source()
 
-import torch
-
 from owaid.data import build_commfor_dataloaders
-from owaid.models import CLIPBinaryDetector
+from owaid.inference import build_model_from_config
 from owaid.training import run_training
-from owaid.utils.config import load_yaml, merge_cli_overrides
-from owaid.utils.logging import JsonlLogger, write_json, write_yaml
-from owaid.utils.paths import make_run_dir
-from owaid.utils.seed import set_seed
-
-
-def _git_hash() -> str:
-    try:
-        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
-    except Exception:
-        return "unknown"
-
-
-def _build_meta(cfg):
-    import torch
-
-    return {
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-        "git_hash": _git_hash(),
-        "hostname": socket.gethostname(),
-        "platform": platform.platform(),
-        "torch_version": torch.__version__,
-        "cuda_available": torch.cuda.is_available(),
-        "seed": cfg.get("seed", 0),
-    }
+from owaid.utils import (
+    JsonlLogger,
+    load_yaml,
+    make_run_dir,
+    merge_cli_overrides,
+    save_resolved_config,
+    set_seed,
+    write_json,
+    write_meta,
+)
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser()
-    p.add_argument("--config", required=True)
-    p.add_argument("--device", default="cpu")
-    p.add_argument("--opts", nargs="*")
-    return p.parse_args()
+    parser = argparse.ArgumentParser(description="Train the baseline CLIP detector")
+    parser.add_argument("--config", required=True)
+    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--validate-only", action="store_true")
+    parser.add_argument("--opts", nargs="*")
+    return parser.parse_args()
+
+
+def _validate_config(cfg: dict) -> None:
+    required = ["data", "model", "train", "output"]
+    missing = [key for key in required if key not in cfg]
+    if missing:
+        raise ValueError(f"Missing required config sections: {missing}")
+    if cfg.get("data", {}).get("dataset") != "commfor_small":
+        raise ValueError("train_baseline.py requires data.dataset=commfor_small")
 
 
 def main() -> None:
     args = parse_args()
-    cfg = load_yaml(args.config)
-    cfg = merge_cli_overrides(cfg, args.opts)
+    cfg = merge_cli_overrides(load_yaml(args.config), args.opts)
+    _validate_config(cfg)
+
+    if args.validate_only:
+        print("Config validation OK")
+        return
+
     set_seed(int(cfg.get("seed", 0)), deterministic=bool(cfg.get("deterministic", True)))
 
     run_dir = make_run_dir(cfg)
     cfg.setdefault("output", {})["run_dir"] = run_dir
-    write_yaml(str(Path(run_dir) / "config.yaml"), cfg)
-    write_json(str(Path(run_dir) / "meta.json"), _build_meta(cfg))
+    save_resolved_config(run_dir, cfg)
+    write_meta(run_dir, cfg)
 
-    dataloaders = build_commfor_dataloaders(cfg)
-    train_loader = dataloaders["train"]
-    val_loader = dataloaders.get("val")
-
-    model_cfg = cfg.get("model", cfg).get("clip", cfg.get("model", {}))
-    hidden = cfg.get("model", {}).get("head", {}).get("hidden_dims", [512, 256])
-    dropout = float(cfg.get("model", {}).get("head", {}).get("dropout", 0.1))
-    model = CLIPBinaryDetector(
-        model_name=model_cfg.get("model_name", "ViT-B-32"),
-        pretrained=model_cfg.get("pretrained", "openai"),
-        freeze=bool(model_cfg.get("freeze", True)),
-        unfreeze_last_n=model_cfg.get("unfreeze_last_n"),
-        head_hidden_dims=hidden,
-        dropout=dropout,
-    ).to(args.device)
-
+    dataloaders = build_commfor_dataloaders(cfg, run_dir=run_dir)
+    model = build_model_from_config(cfg).to(args.device)
     logger = JsonlLogger(str(Path(run_dir) / "logs" / "train.jsonl"))
-    run_training(cfg, model, train_loader, val_loader, run_dir=run_dir, device=args.device, logger=logger)
+    summary = run_training(
+        cfg,
+        model,
+        dataloaders["train_fit"],
+        dataloaders.get("val"),
+        run_dir=run_dir,
+        device=args.device,
+        logger=logger,
+    )
+    write_json(str(Path(run_dir) / "train_summary.json"), summary)
+    print(run_dir)
 
 
 if __name__ == "__main__":

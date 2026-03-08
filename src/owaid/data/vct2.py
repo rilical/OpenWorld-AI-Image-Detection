@@ -26,10 +26,11 @@ from typing import Any, Callable, Dict, Optional
 
 from PIL import Image
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import DataLoader, Dataset
 
 from .transforms import _to_tensor
-from ..utils.paths import require_env
+from .transforms import build_clip_transform
+from ..utils.paths import require_env, stable_sample_id
 
 
 class VCT2Dataset(Dataset):
@@ -52,7 +53,7 @@ class VCT2Dataset(Dataset):
                 "`{split}.csv` / `{split}.json` manifest files or `root/{split}/{real,ai}` folders."
             )
 
-    def _index_samples(self) -> list[tuple[Path, int]]:
+    def _index_samples(self) -> list[dict[str, Any]]:
         # 1) Manifest mode
         for manifest in [f"{self.split}.csv", f"{self.split}.json"]:
             path = self.root / manifest
@@ -69,7 +70,7 @@ class VCT2Dataset(Dataset):
                     return samples
 
         # 2) Folder mode
-        candidates: list[tuple[Path, int]] = []
+        candidates: list[dict[str, Any]] = []
         split_dir = self.root / self.split
         for label_name, label in [("real", 0), ("ai", 1)]:
             class_dir = split_dir / label_name
@@ -77,7 +78,7 @@ class VCT2Dataset(Dataset):
                 continue
             for ext in ["*.jpg", "*.jpeg", "*.png", "*.webp", "*.bmp"]:
                 for path in class_dir.glob(ext):
-                    candidates.append((path, label))
+                    candidates.append({"path": path, "label": label})
 
         if not candidates:
             available = sorted(p.name for p in self.root.rglob("*") if p.is_file())[:20]
@@ -106,7 +107,7 @@ class VCT2Dataset(Dataset):
         else:
             raise RuntimeError(f"Unsupported manifest extension: {manifest_path.suffix}")
 
-        out: list[tuple[Path, int]] = []
+        out: list[dict[str, Any]] = []
         for row in rows:
             if not isinstance(row, dict):
                 continue
@@ -122,24 +123,33 @@ class VCT2Dataset(Dataset):
             label = row.get("label")
             if label is None:
                 continue
-            out.append((path, int(label)))
+            out.append({
+                "path": path,
+                "label": int(label),
+                "generator": row.get("generator"),
+                "group": row.get("group"),
+            })
         return out
 
     def __len__(self) -> int:
         return len(self.samples)
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
-        path, label = self.samples[idx]
+        sample = self.samples[idx]
+        path = sample["path"]
+        label = int(sample["label"])
         image = Image.open(path).convert("RGB")
         tensor = self.transform(image) if self.transform else _to_tensor(image)
         return {
             "image": tensor,
-            "label": int(label),
+            "label": label,
             "meta": {
-                "id": str(path),
+                "id": stable_sample_id("vct2", path=path, root=self.root),
                 "source_dataset": "VCT2",
                 "split": self.split,
                 "path": str(path),
+                "generator": sample.get("generator"),
+                "group": sample.get("group"),
             },
         }
 
@@ -149,4 +159,24 @@ class VCT2Config:
     root: str = ""
 
 
-__all__ = ["VCT2Dataset", "VCT2Config"]
+def build_vct2_dataloader(cfg: Dict[str, Any] | Any) -> DataLoader:
+    """Build a VCT2 evaluation dataloader from config."""
+    cfg_dict = cfg if isinstance(cfg, dict) else vars(cfg)
+    data_cfg = cfg_dict.get("data", cfg_dict)
+    transform = build_clip_transform(cfg_dict, train=False)
+    dataset = VCT2Dataset(
+        split=data_cfg.get("split", "test"),
+        transform=transform,
+        data_root=data_cfg.get("vct2_root"),
+    )
+    return DataLoader(
+        dataset,
+        batch_size=int(data_cfg.get("batch_size", 32)),
+        shuffle=False,
+        num_workers=max(0, int(data_cfg.get("num_workers", 2))),
+        pin_memory=torch.cuda.is_available(),
+        drop_last=False,
+    )
+
+
+__all__ = ["VCT2Dataset", "VCT2Config", "build_vct2_dataloader"]

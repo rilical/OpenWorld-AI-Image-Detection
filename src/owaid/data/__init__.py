@@ -13,7 +13,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Subset
 
-from .commfor_small import CommunityForensicsSmallDataset
+from .commfor_small import CommunityForensicsSmallDataset, CommunityForensicsSmallIterableDataset
 from .vct2 import VCT2Dataset
 from .raid import RAIDDataset
 from .aria import ARIADataset
@@ -107,10 +107,15 @@ def _extract_cfg(cfg: Any) -> Dict[str, Any]:
     return {}
 
 
-def _build_hf_dataset(*, split: str, streaming: bool):
+def _build_hf_dataset(*, split: str, streaming: bool, training=True):
     from datasets import load_dataset
-
-    return load_dataset("OwensLab/CommunityForensics-Small", split=split, streaming=streaming)
+    
+    # training
+    if training:
+        return load_dataset("OwensLab/CommunityForensics-Small", split=split, streaming=streaming)
+    # evaluation
+    else: 
+        return load_dataset("OwensLab/CommunityForensics-Eval", split=split, streaming=streaming)
 
 
 def _extract_labels_fast(hf_dataset, label_map: Dict[str, int] | None = None) -> np.ndarray:
@@ -179,7 +184,7 @@ def build_commfor_dataloaders(cfg: Any, run_dir: str | None = None) -> Dict[str,
         )
         streaming = False
 
-    train_set = _build_hf_dataset(split="train", streaming=streaming)
+    train_set = _build_hf_dataset(split="train", streaming=streaming, training=True)
 
     if streaming:
         # Streaming path: shuffle then take a fixed number of samples,
@@ -320,8 +325,14 @@ def build_eval_dataloader(cfg: Any, dataset_name: str) -> DataLoader:
     name = (dataset_name or "").lower()
     if name in {"commfor", "commfor_small", "communityforensics-small", "communityforensics_small"}:
         split = data_cfg.get("split", "validation")
-        ds = _build_hf_dataset(split=split, streaming=False)
-        if max_eval_samples is not None and max_eval_samples < len(ds):
+        eval_streaming = bool(data_cfg.get("streaming", False))
+        eval_training = data_cfg.get("eval_dataset", "training") == "training"
+        ds = _build_hf_dataset(split=split, streaming=eval_streaming, training=eval_training)
+        if eval_streaming:
+            rows = list(_islice_dataset(ds, max_eval_samples or 2000))
+            from datasets import Dataset as HFDataset
+            ds = HFDataset.from_list(rows)
+        elif max_eval_samples is not None and max_eval_samples < len(ds):
             rng = np.random.default_rng(seed)
             subset_idx = rng.choice(len(ds), size=max_eval_samples, replace=False)
             ds = ds.select(subset_idx.tolist())

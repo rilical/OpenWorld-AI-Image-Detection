@@ -137,6 +137,9 @@ def run_training(
     best_path = Path(run_dir) / "checkpoints" / "best.pt"
     last_path = Path(run_dir) / "checkpoints" / "last.pt"
     best_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # new for debugging
+    metric_key = cfg.get("train", {}).get("best_metric", "auroc")
 
     if resume_from:
         state = load_checkpoint(str(resume_from), model, optimizer=optimizer)

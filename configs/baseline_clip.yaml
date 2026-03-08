@@ -1,7 +1,8 @@
 seed: 123
 
 deterministic: true
-device: cpu
+# device: cpu
+device: cuda
 
 output:
   root: "outputs/runs"
@@ -39,7 +40,7 @@ model:
     cache_dir: null
 
 train:
-  epochs: 1
+  epochs: 30 # modified .. original value is 1
   lr: 2e-4
   weight_decay: 1e-4
   amp: false

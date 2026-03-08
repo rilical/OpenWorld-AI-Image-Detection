@@ -11,7 +11,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Subset
 
-from .commfor_small import CommunityForensicsSmallDataset
+from .commfor_small import CommunityForensicsSmallDataset, CommunityForensicsSmallIterableDataset
 from .vct2 import VCT2Dataset
 from .raid import RAIDDataset
 from .aria import ARIADataset
@@ -57,10 +57,15 @@ def _extract_cfg(cfg: Any) -> Dict[str, Any]:
     return {}
 
 
-def _build_hf_dataset(*, split: str, streaming: bool):
+def _build_hf_dataset(*, split: str, streaming: bool, training=True):
     from datasets import load_dataset
-
-    return load_dataset("OwensLab/CommunityForensics-Small", split=split, streaming=streaming)
+    
+    # training
+    if training:
+        return load_dataset("OwensLab/CommunityForensics-Small", split=split, streaming=streaming)
+    # evaluation
+    else: 
+        return load_dataset("OwensLab/CommunityForensics-Eval", split=split, streaming=streaming)
 
 
 def build_commfor_dataloaders(cfg: Any) -> Dict[str, DataLoader]:
@@ -75,17 +80,95 @@ def build_commfor_dataloaders(cfg: Any) -> Dict[str, DataLoader]:
     seed = int(cfg_dict.get("seed", 42))
     calibration_fraction = float(data_cfg.get("calibration_fraction", 0.1))
 
-    streaming = bool(data_cfg.get("streaming", False))
-    if streaming:
-        warnings.warn(
-            "CommunityForensics-Small streaming mode cannot build deterministic train/calibration splits. "
-            "Falling back to non-streaming load for reproducible split extraction."
-        )
-        streaming = False
+    # streaming = bool(data_cfg.get("streaming", False))
+    # if streaming:
+    #     warnings.warn(
+    #         "CommunityForensics-Small streaming mode cannot build deterministic train/calibration splits. "
+    #         "Falling back to non-streaming load for reproducible split extraction."
+    #     )
+    #     streaming = False
 
-    train_set = _build_hf_dataset(split="train", streaming=streaming)
-    train_transform = build_clip_transform(cfg_dict, train=True)
-    train_dataset = CommunityForensicsSmallDataset(train_set, transform=train_transform, split="train")
+    # train_set = _build_hf_dataset(split="train", streaming=streaming)
+    # train_transform = build_clip_transform(cfg_dict, train=True)
+    # train_dataset = CommunityForensicsSmallDataset(train_set, transform=train_transform, split="train")
+    
+    '''
+    # new for debugging to make sure training works without cal or val and it is :) 
+    if streaming: 
+        max_train_samples = int(data_cfg.get("max_train_samples", 2))
+        train_set = _build_hf_dataset(split="train", streaming=True)
+        train_transform = build_clip_transform(cfg_dict, train=True)
+        train_dataset = CommunityForensicsSmallIterableDataset(train_set, transform=train_transform
+                        , split="train", max_samples=max_train_samples)
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=0,
+            pin_memory=torch.cuda.is_available(),
+            drop_last=False,
+        )
+        
+        return {"train": train_loader}
+    '''
+    
+
+    # new for debugging with both train, val and cal to test the full pipeline 
+    streaming = True
+    if streaming: 
+        max_train_samples = 2000
+        val_frac = 0.1
+        
+        base = _build_hf_dataset(split="train", streaming=True, training=True)
+        base = base.shuffle(seed=seed, buffer_size=int(data_cfg.get("shuffle_buffer", 100))) 
+        
+        base = base.take(max_train_samples)
+        
+        n_cal = int(max_train_samples * calibration_fraction)
+        n_val = int(max_train_samples * val_frac)
+        n_train = max_train_samples - n_cal - n_val
+        
+        train_stream = base.take(n_train)
+        rest = base.skip(n_train)
+        cal_stream = rest.take(n_cal)
+        val_stream = rest.skip(n_cal).take(n_val)
+        
+        train_ds = CommunityForensicsSmallIterableDataset(train_stream, transform=build_clip_transform(cfg_dict, 
+                                                                    train=True), split="train")
+        cal_ds   = CommunityForensicsSmallIterableDataset(cal_stream,   transform=build_clip_transform(cfg_dict, 
+                                                                        train=False), split="cal")
+        val_ds   = CommunityForensicsSmallIterableDataset(val_stream,   transform=build_clip_transform(cfg_dict, 
+                                                                    train=False), split="val")
+        
+        train_loader = DataLoader(
+            train_ds, 
+            batch_size=batch_size, 
+            shuffle=False, 
+            num_workers=0,
+            pin_memory=torch.cuda.is_available(),
+            drop_last=False,
+            )
+        
+        cal_loader = DataLoader(
+            cal_ds,   
+            batch_size=batch_size, 
+            shuffle=False, 
+            num_workers=0, 
+            pin_memory=torch.cuda.is_available(),
+            drop_last=False,
+            )
+            
+        val_loader = DataLoader(
+            val_ds,   
+            batch_size=batch_size, 
+            shuffle=False, 
+            num_workers=0,
+            pin_memory=torch.cuda.is_available(),
+            drop_last=False,
+            )
+        # anything after this line in this function is ignored for now due to making the streaming works 
+        return {"train": train_loader, "cal": cal_loader, "val": val_loader, "calibration": cal_loader}
+
 
     n = len(train_dataset)
     if not (0.0 <= calibration_fraction < 1.0):
@@ -165,9 +248,24 @@ def build_eval_dataloader(cfg: Any, dataset_name: str) -> DataLoader:
 
     name = (dataset_name or "").lower()
     if name in {"commfor", "commfor_small", "communityforensics-small", "communityforensics_small"}:
-        split = data_cfg.get("split", "validation")
-        ds = _build_hf_dataset(split=split, streaming=False)
-        dataset = CommunityForensicsSmallDataset(ds, transform=transform, split=split)
+        # split = data_cfg.get("split", "validation")
+        # ds = _build_hf_dataset(split=split, streaming=False)
+        # dataset = CommunityForensicsSmallDataset(ds, transform=transform, split=split)
+        
+        # new for debugging and making streaming also for validation
+        streaming = True 
+        if streaming: 
+            split = "CompEval"
+            max_eval_samples = 2000
+            ds = _build_hf_dataset(split=split, streaming=True, training=False)
+            dataset = CommunityForensicsSmallIterableDataset(
+                ds, 
+                transform=transform,
+                split=split,
+                max_samples=max_eval_samples,
+            )
+            num_workers = 0
+            
     elif name == "vct2":
         dataset = VCT2Dataset(split=data_cfg.get("split", "test"), transform=transform, data_root=data_cfg.get("vct2_root"))
     elif name == "raid":

@@ -98,6 +98,9 @@ def run_training(
     best_path = Path(run_dir) / "checkpoints" / "best.pt"
     last_path = Path(run_dir) / "checkpoints" / "last.pt"
     best_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # new for debugging
+    metric_key = cfg.get("train", {}).get("best_metric", "auroc")
 
     for epoch in range(start_epoch, epochs):
         tr_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, amp=amp, grad_accum_steps=grad_accum_steps)
@@ -110,6 +113,8 @@ def run_training(
             }
         )
         if val_loader is None:
+            save_checkpoint(str(last_path), model, optimizer, epoch, global_step, cfg) # new for debugging
+            global_step += 1 # new for debugging
             continue
 
         val_metrics = validate(model, val_loader, device, criterion)

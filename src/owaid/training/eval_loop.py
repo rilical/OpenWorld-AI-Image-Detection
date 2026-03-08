@@ -40,12 +40,17 @@ def evaluate_model(
     logits = torch.cat(all_logits)
     labels = torch.cat(all_labels)
     abst = predict_with_abstention(logits, temperature=temperature, conformal=conformal)
-    probs = abst["probs"].numpy()
-    predictions = abst["predictions"].numpy()
-    confidence = abst["confidence"].numpy()
+    # probs = abst["probs"].numpy()
+    # predictions = abst["predictions"].numpy()
+    # confidence = abst["confidence"].numpy()
+    probs = abst["probs"].detach().cpu().numpy() # new for debugging
+    predictions = abst["predictions"].detach().cpu().numpy() # new for debugging 
+    confidence = abst["confidence"].detach().cpu().numpy() # new for debugging
 
-    answer_mask = ~abst["abstained"].numpy()
-    y_true = labels.numpy()
+    # answer_mask = ~abst["abstained"].numpy()
+    # y_true = labels.numpy()
+    answer_mask = ~abst["abstained"].detach().cpu().numpy() # new for debugging
+    y_true = labels.detach().cpu().numpy() # new for debugging 
 
     y_score = probs[:, 1]
     metrics = {

@@ -195,10 +195,24 @@ def build_commfor_dataloaders(cfg: Any, run_dir: str | None = None) -> Dict[str,
         from datasets import Dataset as HFDataset
         train_set = HFDataset.from_list(rows)
     elif max_train_samples is not None and max_train_samples < len(train_set):
-        # Non-streaming but limited: shuffle indices, then select a subset.
+        # Non-streaming but limited: use stratified sampling to preserve class balance.
+        all_labels = _extract_labels_fast(train_set)
+        unique_classes = np.unique(all_labels)
         rng = np.random.default_rng(seed)
-        subset_idx = rng.choice(len(train_set), size=max_train_samples, replace=False)
-        train_set = train_set.select(subset_idx.tolist())
+        if len(unique_classes) >= 2:
+            # Stratified: sample proportionally from each class
+            subset_idx = []
+            for c in unique_classes:
+                c_indices = np.where(all_labels == c)[0]
+                n_c = max(1, int(round(len(c_indices) / len(all_labels) * max_train_samples)))
+                n_c = min(n_c, len(c_indices))
+                subset_idx.extend(rng.choice(c_indices, size=n_c, replace=False).tolist())
+            # Trim or pad to exactly max_train_samples
+            rng.shuffle(subset_idx)
+            subset_idx = subset_idx[:max_train_samples]
+        else:
+            subset_idx = rng.choice(len(train_set), size=max_train_samples, replace=False).tolist()
+        train_set = train_set.select(subset_idx)
 
     train_transform = build_clip_transform(cfg_dict, train=True)
     train_dataset = CommunityForensicsSmallDataset(train_set, transform=train_transform, split="train")

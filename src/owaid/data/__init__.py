@@ -73,6 +73,7 @@ def _save_split_manifest(
 
     # Also write legacy format for backward compatibility
     legacy_path = Path(run_dir) / "calibration" / "commfor_split_indices.json"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
     with legacy_path.open("w", encoding="utf-8") as f:
         json.dump(
             {"train_indices": train_indices, "calibration_indices": calib_indices},
@@ -228,24 +229,28 @@ def build_commfor_dataloaders(cfg: Any, run_dir: str | None = None) -> Dict[str,
 
         indices = np.arange(n)
 
-        try:
-            from sklearn.model_selection import StratifiedShuffleSplit
-            splitter = StratifiedShuffleSplit(
-                n_splits=1, test_size=calibration_fraction, random_state=seed
-            )
-            train_idx_arr, cal_idx_arr = next(splitter.split(indices, labels))
-            train_idx = train_idx_arr.tolist()
-            cal_idx = cal_idx_arr.tolist()
-        except ImportError:
-            # Fallback: manual stratified split
-            rng = np.random.default_rng(seed)
-            train_idx, cal_idx = [], []
-            for c in np.unique(labels):
-                c_indices = indices[labels == c]
-                rng.shuffle(c_indices)
-                split_at = int((1.0 - calibration_fraction) * len(c_indices))
-                train_idx.extend(c_indices[:split_at].tolist())
-                cal_idx.extend(c_indices[split_at:].tolist())
+        if calibration_fraction == 0.0:
+            train_idx = indices.tolist()
+            cal_idx = []
+        else:
+            try:
+                from sklearn.model_selection import StratifiedShuffleSplit
+                splitter = StratifiedShuffleSplit(
+                    n_splits=1, test_size=calibration_fraction, random_state=seed
+                )
+                train_idx_arr, cal_idx_arr = next(splitter.split(indices, labels))
+                train_idx = train_idx_arr.tolist()
+                cal_idx = cal_idx_arr.tolist()
+            except ImportError:
+                # Fallback: manual stratified split
+                rng = np.random.default_rng(seed)
+                train_idx, cal_idx = [], []
+                for c in np.unique(labels):
+                    c_indices = indices[labels == c]
+                    rng.shuffle(c_indices)
+                    split_at = int((1.0 - calibration_fraction) * len(c_indices))
+                    train_idx.extend(c_indices[:split_at].tolist())
+                    cal_idx.extend(c_indices[split_at:].tolist())
 
         _save_split_manifest(
             str(run_dir), train_idx, cal_idx,

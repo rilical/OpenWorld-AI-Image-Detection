@@ -16,8 +16,10 @@ venv/
 # Outputs
 outputs/runs/*
 outputs/plots/*
+outputs/tables/*
 !outputs/runs/.gitkeep
 !outputs/plots/.gitkeep
+!outputs/tables/.gitkeep
 
 # Reports (generated)
 reports/figures/*
@@ -29,6 +31,7 @@ reports/results_summary.md
 # Data
 data/*
 !data/.gitkeep
+.cache/
 
 # IDE
 .vscode/

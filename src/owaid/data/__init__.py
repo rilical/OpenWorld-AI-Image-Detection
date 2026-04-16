@@ -12,10 +12,18 @@ from typing import Any, Dict
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Subset
+from torch.utils.data.dataloader import default_collate
+
+
+def _collate_skip_none(batch):
+    batch = [x for x in batch if x is not None]
+    if not batch:
+        return None
+    return default_collate(batch)
 
 from .commfor_small import CommunityForensicsSmallDataset, CommunityForensicsSmallIterableDataset
 from .vct2 import VCT2Dataset
-from .raid import RAIDDataset
+from .raid import RAIDDataset, RAIDStreamingDataset
 from .aria import ARIADataset
 from .transforms import build_clip_transform
 
@@ -278,6 +286,7 @@ def build_commfor_dataloaders(cfg: Any, run_dir: str | None = None) -> Dict[str,
         num_workers=max(0, num_workers),
         pin_memory=torch.cuda.is_available(),
         drop_last=False,
+        collate_fn=_collate_skip_none,
     )
 
     eval_transform = build_clip_transform(cfg_dict, train=False)
@@ -289,6 +298,7 @@ def build_commfor_dataloaders(cfg: Any, run_dir: str | None = None) -> Dict[str,
         num_workers=max(0, num_workers),
         pin_memory=torch.cuda.is_available(),
         drop_last=False,
+        collate_fn=_collate_skip_none,
     )
 
     loaders: Dict[str, DataLoader] = {
@@ -317,6 +327,7 @@ def build_commfor_dataloaders(cfg: Any, run_dir: str | None = None) -> Dict[str,
             num_workers=max(0, num_workers),
             pin_memory=torch.cuda.is_available(),
             drop_last=False,
+            collate_fn=_collate_skip_none,
         )
         loaders["val"] = val_loader
     except Exception:
@@ -359,7 +370,15 @@ def build_eval_dataloader(cfg: Any, dataset_name: str) -> DataLoader:
     elif name == "vct2":
         dataset = VCT2Dataset(split=data_cfg.get("split", "test"), transform=transform, data_root=data_cfg.get("vct2_root"))
     elif name == "raid":
-        dataset = RAIDDataset(split=data_cfg.get("split", "test"), transform=transform, data_root=data_cfg.get("raid_root"))
+        if bool(data_cfg.get("streaming", False)):
+            dataset = RAIDStreamingDataset(
+                split=data_cfg.get("split", "test"),
+                transform=transform,
+                max_samples=max_eval_samples,
+            )
+            num_workers = 0
+        else:
+            dataset = RAIDDataset(split=data_cfg.get("split", "test"), transform=transform, data_root=data_cfg.get("raid_root"))
     elif name == "aria":
         dataset = ARIADataset(split=data_cfg.get("split", "test"), transform=transform, data_root=data_cfg.get("aria_root"))
     else:
@@ -372,6 +391,7 @@ def build_eval_dataloader(cfg: Any, dataset_name: str) -> DataLoader:
         num_workers=max(0, num_workers),
         pin_memory=torch.cuda.is_available(),
         drop_last=False,
+        collate_fn=_collate_skip_none,
     )
 
 

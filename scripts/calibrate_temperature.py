@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import os
+os.environ.setdefault(
+    "HF_HOME",
+    "/ocean/projects/cis250202p/gyar/personal/dl/OpenWorld-AI-Image-Detection/.cache/huggingface",
+)
+
 import argparse
 from datetime import datetime
 import platform

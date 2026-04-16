@@ -51,17 +51,19 @@ class CommunityForensicsSmallDataset(Dataset):
     def _extract_meta(self, row: Dict[str, Any], index: int) -> Dict[str, Any]:
         sample_id = stable_sample_id(
             "commfor",
-            provided_id=row.get("id", row.get("image_id")),
+            provided_id=row.get("image_name", row.get("id", row.get("image_id"))),
             split=self.split,
             index=index,
         )
         return {
-            "id": sample_id,
+            "id": str(sample_id),
             "source_dataset": "CommunityForensics-Small",
-            "split": self.split,
-            "generator": row.get("generator"),
-            "path": row.get("path"),
+            "split": str(self.split or ""),
+            "generator": str(row.get("model_name") or row.get("generator") or ""),
+            "path": str(row.get("image_name") or row.get("path") or ""),
         }
+
+    _debug_printed = False
 
     def __getitem__(self, index: int) -> Dict[str, Any]:
         row = self.dataset[index]
@@ -69,14 +71,22 @@ class CommunityForensicsSmallDataset(Dataset):
             # dataset row objects can be custom row wrappers in older datasets versions
             row = dict(row)
 
+        if not CommunityForensicsSmallDataset._debug_printed:
+            print(f"[DEBUG] row keys: {list(row.keys())}")
+            CommunityForensicsSmallDataset._debug_printed = True
+
         image = row.get("image")
         if image is None and "img" in row:
             image = row["img"]
         if image is None and "jpeg" in row:
             image = row["jpeg"]
+        if image is None and row.get("image_data") is not None:
+            import io
+            from PIL import Image as PILImage
+            image = PILImage.open(io.BytesIO(row["image_data"]))
 
         if image is None:
-            raise ValueError(f"Missing image in dataset row at index {index}")
+            return None  # skip bad sample; filtered by collate_fn
 
         if hasattr(image, "convert"):
             image = image.convert("RGB")
@@ -129,9 +139,11 @@ class CommunityForensicsSmallIterableDataset(IterableDataset):
 
         raw = row.get("label", row.get("target", row.get("y", 0)))
         if isinstance(raw, (bool, int)):
+            print(f"DEBUG raw label (bool/int): {raw} (type: {type(raw).__name__})")
             return int(raw)
         if isinstance(raw, str):
             raw_key = raw.lower()
+            print(f"DEBUG raw label (str): '{raw}' -> '{raw_key}'")
             if raw_key in self.label_map:
                 return int(self.label_map[raw_key])
             if raw_key in {"ai", "synthetic", "fake", "1"}:

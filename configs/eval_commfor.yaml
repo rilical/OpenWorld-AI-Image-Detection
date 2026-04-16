@@ -4,11 +4,11 @@ deterministic: true
 data:
   dataset: "commfor_small"
   batch_size: 64
-  num_workers: 2
+  num_workers: 0
   img_size: 224
   calibration_fraction: 0.1
-  split: "validation"
-  max_eval_samples: null
+  split: "train"
+  max_eval_samples: 5000
 
 eval:
   save_predictions: true

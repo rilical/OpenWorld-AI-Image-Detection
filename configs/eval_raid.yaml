@@ -4,9 +4,11 @@ deterministic: true
 data:
   dataset: "raid"
   batch_size: 64
-  num_workers: 2
+  num_workers: 0
   img_size: 224
   split: "test"
+  streaming: true
+  max_eval_samples: 5000
 
 eval:
   save_predictions: true

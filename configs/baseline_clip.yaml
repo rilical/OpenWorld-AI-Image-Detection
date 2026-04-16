@@ -11,7 +11,7 @@ output:
 data:
   dataset: "commfor_small"
   batch_size: 32
-  num_workers: 2
+  num_workers: 0
   img_size: 224
   calibration_fraction: 0.1
   max_train_samples: null
@@ -41,6 +41,7 @@ model:
 
 train:
   epochs: 30 # modified .. original value is 1
+  steps_per_epoch: 100
   lr: 2e-4
   weight_decay: 1e-4
   amp: false

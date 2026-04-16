@@ -18,6 +18,8 @@ def _collect_logits_labels(model, loader, device) -> tuple[torch.Tensor, torch.T
     label_list = []
     with torch.no_grad():
         for batch in loader:
+            if batch is None:
+                continue
             images = batch["image"].to(device)
             labels = batch["label"].to(device)
             out = model(images)

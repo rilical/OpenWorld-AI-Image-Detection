@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, List
 import numpy as np
 import pandas as pd
 import torch
+from tqdm import tqdm
 
 from ..metrics import (
     auroc,
@@ -168,9 +169,13 @@ def evaluate_model(
     meta_list: List[Dict[str, Any]] = []
 
     with torch.no_grad():
-        for batch_idx, batch in enumerate(loader):
+        n_total = len(loader) if hasattr(loader.dataset, "__len__") else None
+        for batch_idx, batch in enumerate(tqdm(loader, desc=f"eval [{dataset_name or ''}]", leave=False, total=n_total)):
+            if batch is None:
+                continue
             images = batch["image"].to(device)
             labels = batch["label"].to(device)
+            print(f"[eval] batch {batch_idx} | samples so far: {batch_idx * images.shape[0] + images.shape[0]}", flush=True)
             out = eval_model(images)
             logits_list.append(out["logits"].detach().cpu())
             labels_list.append(labels.detach().cpu())

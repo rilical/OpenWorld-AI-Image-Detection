@@ -24,14 +24,19 @@ def train_one_epoch(
     logger=None,
     epoch: int = 0,
     global_step: int = 0,
+    max_steps: int | None = None,
 ) -> Tuple[float, int]:
     """Train for one epoch and return average loss plus updated global step."""
+    import itertools
     model.train()
     optimizer.zero_grad(set_to_none=True)
     scaler = torch.cuda.amp.GradScaler(enabled=amp and device.startswith("cuda"))
     step_losses = []
 
-    for batch_idx, batch in enumerate(tqdm(loader, desc="train", leave=False)):
+    iterable = itertools.islice(loader, max_steps) if max_steps is not None else loader
+    for batch_idx, batch in enumerate(tqdm(iterable, desc="train", leave=False, total=max_steps)):
+        if batch is None:
+            continue
         images = batch["image"].to(device)
         labels = batch["label"].to(device)
 
@@ -79,6 +84,8 @@ def validate(model, loader, device: str, criterion, temperature: float | None = 
     losses = []
     with torch.no_grad():
         for batch in tqdm(loader, desc="val", leave=False):
+            if batch is None:
+                continue
             images = batch["image"].to(device)
             labels = batch["label"].to(device)
             out = model(images)
@@ -121,6 +128,9 @@ def run_training(
     grad_accum_steps = int(train_cfg.get("grad_accum_steps", 1))
     amp = bool(train_cfg.get("amp", False))
     patience = train_cfg.get("early_stopping_patience")
+    steps_per_epoch = train_cfg.get("steps_per_epoch")
+    if steps_per_epoch is not None:
+        steps_per_epoch = int(steps_per_epoch)
     metric_key = train_cfg.get("best_metric", "auroc")
     resume_from = train_cfg.get("resume_from")
 
@@ -146,6 +156,13 @@ def run_training(
         start_epoch = int(state.get("epoch", start_epoch)) + 1
         global_step = int(state.get("global_step", 0))
 
+    if torch.cuda.is_available():
+        print(f"[GPU] Using: {torch.cuda.get_device_name(0)}")
+        print(f"[GPU] Memory allocated: {torch.cuda.memory_allocated(0) / 1e6:.1f} MB")
+        print(f"[GPU] Memory reserved:  {torch.cuda.memory_reserved(0) / 1e6:.1f} MB")
+    else:
+        print("[GPU] CUDA not available — running on CPU")
+
     for epoch in range(start_epoch, epochs):
         train_loss, global_step = train_one_epoch(
             model,
@@ -158,6 +175,7 @@ def run_training(
             logger=logger,
             epoch=epoch,
             global_step=global_step,
+            max_steps=steps_per_epoch,
         )
         logger.log(
             {

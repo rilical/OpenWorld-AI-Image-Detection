@@ -22,7 +22,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--config", required=True)
     p.add_argument("--run", required=True)
-    p.add_argument("--device", default="cpu")
+    p.add_argument("--device", default="cuda")
     p.add_argument(
         "--evaluation-mode",
         choices=["all", "forced", "temperature", "threshold", "conformal"],

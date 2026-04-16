@@ -28,7 +28,7 @@
 ## RAID (Adversarial Evaluation)
 
 - **Source**: RAID adversarial benchmark (~72K examples)
-- **Download**: Hugging Face `OwensLab/RAID` (preferred) or local files
+- **Download**: Hugging Face `aimagelab/RAID` (preferred) or local files
 - **Env var**: `RAID_ROOT` (optional for local mode)
 - **Config override**: `data.raid_root`
 - **Expected structure** (local):

@@ -33,7 +33,8 @@ def load_config_with_overrides(
         if run_cfg_path.exists():
             with run_cfg_path.open("r", encoding="utf-8") as f:
                 run_cfg = yaml.safe_load(f) or {}
-            cfg = deep_update(cfg, run_cfg)
+            # Run config provides model/training settings; eval config wins for data settings.
+            cfg = deep_update(run_cfg, cfg)
 
     if overrides:
         cfg = merge_cli_overrides(cfg, overrides)
@@ -103,6 +104,7 @@ def evaluate_in_run(
     eval_logger = JsonlLogger(str(Path(run_dir) / "logs" / "eval.jsonl"))
 
     for mode in selected_modes:
+        print(f"[eval] mode={mode} ...")
         spec = mode_specs[mode]
         preds_path = None
         if save_predictions:
@@ -119,6 +121,8 @@ def evaluate_in_run(
         )
         metrics["evaluation_mode"] = mode
         all_metrics[mode] = metrics
+        def _fmt(v): return f"{v:.4f}" if isinstance(v, (int, float)) else str(v)
+        print(f"[eval] mode={mode} auroc={_fmt(metrics.get('auroc', 'N/A'))} acc={_fmt(metrics.get('selective_accuracy', 'N/A'))}")
         eval_logger.log({"dataset": dataset_name, "artifact": artifact_name, "mode": mode, "metrics": metrics})
 
     write_json(str(eval_dir / "metrics.json"), all_metrics)

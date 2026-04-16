@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import sys
 
@@ -17,3 +18,8 @@ def bootstrap_repo_source() -> None:
     src_dir_str = str(src_dir)
     if src_dir_str not in sys.path:
         sys.path.insert(0, src_dir_str)
+
+    # Point HuggingFace cache to repo-local directory so all scripts share
+    # the same cache and never fall back to ~/.cache/huggingface.
+    hf_cache = root / ".cache" / "huggingface"
+    os.environ.setdefault("HF_HOME", str(hf_cache))

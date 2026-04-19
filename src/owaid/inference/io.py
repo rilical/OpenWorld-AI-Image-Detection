@@ -5,9 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
+import torch
 import yaml
 
-from ..models import CLIPBinaryDetector, ClipDIREFusionDetector
+from ..models import (
+    CLIPBinaryDetector,
+    ClipDIREFusionDetector,
+    DomainAdversarialWrapper,
+    SGFNet,
+)
 from ..training import load_checkpoint as training_load_checkpoint
 from ..utils.logging import read_json
 
@@ -43,8 +49,8 @@ def resolve_checkpoint_path(run_dir_or_checkpoint: str) -> Path:
     )
 
 
-def build_model_from_config(cfg: Dict[str, Any]):
-    """Construct the configured detector model."""
+def _build_base_model(cfg: Dict[str, Any]):
+    """Construct the configured detector model without any DAT wrapping."""
     model_cfg = cfg.get("model", {})
     clip_cfg = model_cfg.get("clip", {})
     head_cfg = model_cfg.get("head", {})
@@ -52,7 +58,22 @@ def build_model_from_config(cfg: Dict[str, Any]):
     hidden = head_cfg.get("hidden_dims", [512, 256])
     dropout = float(head_cfg.get("dropout", 0.1))
 
-    if model_cfg.get("type", "clip_baseline") == "clip_dire_fusion" and bool(dire_cfg.get("enabled", True)):
+    model_type = model_cfg.get("type", "clip_baseline")
+
+    if model_type == "sgf_net":
+        sgf_cfg = model_cfg.get("sgf", {})
+        return SGFNet(
+            model_name=clip_cfg.get("model_name", "ViT-B-32"),
+            pretrained=clip_cfg.get("pretrained", "openai"),
+            freeze_clip=bool(clip_cfg.get("freeze", True)),
+            spectral_dim=int(sgf_cfg.get("spectral_dim", 128)),
+            pixel_dim=int(sgf_cfg.get("pixel_dim", 128)),
+            fused_dim=int(sgf_cfg.get("fused_dim", 256)),
+            head_hidden_dims=sgf_cfg.get("head_hidden_dims", [128]),
+            dropout=dropout,
+        )
+
+    if model_type == "clip_dire_fusion" and bool(dire_cfg.get("enabled", True)):
         return ClipDIREFusionDetector(
             model_name=clip_cfg.get("model_name", "ViT-B-32"),
             pretrained=clip_cfg.get("pretrained", "openai"),
@@ -71,6 +92,39 @@ def build_model_from_config(cfg: Dict[str, Any]):
         head_hidden_dims=hidden,
         dropout=dropout,
     )
+
+
+def build_model_from_config(cfg: Dict[str, Any]):
+    """Construct the configured detector model, optionally wrapped for DAT."""
+    base_model = _build_base_model(cfg)
+
+    train_cfg = cfg.get("train", {})
+    dat_cfg = train_cfg.get("domain_adversarial", {}) if isinstance(train_cfg, dict) else {}
+    if isinstance(dat_cfg, dict) and bool(dat_cfg.get("enabled", False)):
+        with torch.no_grad():
+            was_training = base_model.training
+            base_model.eval()
+            probe = torch.zeros(1, 3, 224, 224)
+            out = base_model(probe, return_features=True)
+            if was_training:
+                base_model.train()
+        if not isinstance(out, dict) or "features" not in out:
+            raise ValueError(
+                "build_model_from_config: configured model "
+                f"{type(base_model).__name__} does not expose 'features' with "
+                "return_features=True; cannot enable DAT."
+            )
+        feature_dim = int(out["features"].shape[-1])
+        return DomainAdversarialWrapper(
+            base_model=base_model,
+            feature_dim=feature_dim,
+            hidden_dims=dat_cfg.get("hidden_dims", [128]),
+            num_domains=int(dat_cfg.get("num_domains", 2)),
+            dropout=float(dat_cfg.get("dropout", 0.1)),
+            max_lambda=float(dat_cfg.get("max_lambda", 0.5)),
+        )
+
+    return base_model
 
 
 def load_checkpoint(

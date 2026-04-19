@@ -9,7 +9,6 @@ The helpers in this module intentionally stay small and explicit:
 from __future__ import annotations
 
 import json
-from argparse import ArgumentParser
 from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any, Dict, Iterable, Mapping
@@ -148,11 +147,6 @@ def merge_cli_overrides(cfg_dict: Dict[str, Any], overrides: Iterable[str]) -> D
     return deep_update(cfg_dict, parse_overrides(overrides))
 
 
-def parse_kwargs_to_dict(items: Iterable[str]) -> Dict[str, Any]:
-    """Backward-compatible alias for ``parse_overrides``."""
-    return parse_overrides(items)
-
-
 def to_namespace(cfg_dict: Dict[str, Any]) -> SimpleNamespace:
     """Convert a nested mapping to a recursive :class:`SimpleNamespace`."""
 
@@ -175,15 +169,9 @@ def namespace_to_dict(ns: Any) -> Dict[str, Any]:
     return ns
 
 
-def add_config_args(parser: ArgumentParser) -> ArgumentParser:
-    """Register common config CLI flags used across scripts."""
-    parser.add_argument('--config', required=True)
-    parser.add_argument('--opts', nargs='*', default=[], help='Config overrides as key=value')
-    return parser
-
-
 def write_yaml(path: str, obj: Any) -> None:
-    """Write ``obj`` as YAML (legacy helper used by scripts)."""
-    with open(path, 'w', encoding='utf-8') as f:
-        yaml.safe_dump(obj, f)
+    """Write ``obj`` as YAML. Delegates to ``logging.write_yaml``."""
+    from .logging import write_yaml as _write_yaml
+
+    _write_yaml(path, obj)
 

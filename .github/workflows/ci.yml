@@ -19,10 +19,7 @@ jobs:
           python3 scripts/train_with_dire.py --help
           python3 scripts/calibrate_temperature.py --help
           python3 scripts/build_conformal.py --help
-          python3 scripts/eval_commfor.py --help
-          python3 scripts/eval_vct2.py --help
-          python3 scripts/eval_raid.py --help
-          python3 scripts/eval_aria.py --help
+          python3 scripts/evaluate.py --help
           python3 scripts/cache_residuals.py --help
           python3 scripts/predict_image.py --help
           python3 scripts/make_plots.py --help

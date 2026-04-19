@@ -5,15 +5,15 @@ device: cuda
 
 output:
   root: "outputs/runs"
-  run_name: null
+  run_name: "baseline_mix_aug_dat"
 
 data:
-  dataset: "commfor_small"
+  dataset: "commfor_aiart_mix"
   batch_size: 32
   num_workers: 0
   img_size: 224
   calibration_fraction: 0.1
-  max_train_samples: null
+  max_train_samples: 5000
   max_eval_samples: null
   streaming: false
   shuffle_buffer: 100
@@ -23,29 +23,41 @@ data:
     blur_sigma: null
     resize_shorter: 256
     center_crop: true
+    tier1:
+      enabled: true
+      jpeg_prob: 0.7
+      jpeg_quality_range: [60, 95]
+      resized_crop_scale: [0.7, 1.0]
+      color_jitter: 0.1
 
 model:
-  type: "clip_dire_fusion"
+  type: "clip_baseline"
   clip:
     model_name: "ViT-B-32"
     pretrained: "openai"
     freeze: true
-    unfreeze_last_n: 0
+    unfreeze_last_n: null
   head:
-    hidden_dims: [256, 128]
+    hidden_dims: [512, 256]
     dropout: 0.1
   dire:
-    enabled: true
-    cache_dir: "outputs/runs/dire_cache"
+    enabled: false
+    cache_dir: null
 
 train:
   epochs: 30
-  steps_per_epoch: 100
+  steps_per_epoch: 200
   lr: 2e-4
   weight_decay: 1e-4
   amp: false
   grad_accum_steps: 1
   best_metric: "auroc"
+  domain_adversarial:
+    enabled: true
+    hidden_dims: [128]
+    num_domains: 2
+    dropout: 0.1
+    max_lambda: 0.5
 
 calibration:
   temperature: true

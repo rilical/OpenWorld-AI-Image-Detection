@@ -1,0 +1,16 @@
+seed: 123
+deterministic: true
+
+data:
+  dataset: "cifake"
+  batch_size: 64
+  num_workers: 0
+  img_size: 224
+  split: "test"
+  max_eval_samples: 5000
+
+eval:
+  save_predictions: true
+
+output:
+  root: "outputs/runs"

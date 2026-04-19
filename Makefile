@@ -30,16 +30,16 @@ conformal:
 		--run $(RUN) --device $(DEVICE)
 
 eval-commfor:
-	python3 scripts/eval_commfor.py --config configs/eval_commfor.yaml --run $(RUN) --device $(DEVICE)
+	python3 scripts/evaluate.py --dataset commfor --config configs/eval_commfor.yaml --run $(RUN) --device $(DEVICE)
 
 eval-vct2:
-	python3 scripts/eval_vct2.py --config configs/eval_vct2.yaml --run $(RUN) --device $(DEVICE)
+	python3 scripts/evaluate.py --dataset vct2 --config configs/eval_vct2.yaml --run $(RUN) --device $(DEVICE)
 
 eval-raid:
-	python3 scripts/eval_raid.py --config configs/eval_raid.yaml --run $(RUN) --device $(DEVICE)
+	python3 scripts/evaluate.py --dataset raid --config configs/eval_raid.yaml --run $(RUN) --device $(DEVICE)
 
 eval-aria:
-	python3 scripts/eval_aria.py --config configs/eval_aria.yaml --run $(RUN) --device $(DEVICE)
+	python3 scripts/evaluate.py --dataset aria --config configs/eval_aria.yaml --run $(RUN) --device $(DEVICE)
 
 plots:
 	python3 scripts/make_plots.py --runs outputs/runs --out reports/figures

@@ -2,13 +2,26 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
 
 import torch
 from torch.utils.data import Dataset, IterableDataset
 
 from ..utils.paths import stable_sample_id
+
+
+ARCH_TO_IDX = {"Real": 0, "LatDiff": 1, "GAN": 2, "PixDiff": 3, "Other": 4}
+_DEFAULT_ARCH_IDX = -1  # sentinel for "unknown architecture" (RAID, misc)
+
+
+def _arch_label(row: Dict[str, Any], label: int) -> int:
+    """Map raw architecture string to class index. Reals are always class 0."""
+    if label == 0:
+        return ARCH_TO_IDX["Real"]
+    raw = row.get("architecture")
+    if raw is None:
+        return _DEFAULT_ARCH_IDX
+    return ARCH_TO_IDX.get(str(raw), ARCH_TO_IDX["Other"])
 
 
 class CommunityForensicsSmallDataset(Dataset):
@@ -63,17 +76,10 @@ class CommunityForensicsSmallDataset(Dataset):
             "path": str(row.get("image_name") or row.get("path") or ""),
         }
 
-    _debug_printed = False
-
     def __getitem__(self, index: int) -> Dict[str, Any]:
         row = self.dataset[index]
         if not isinstance(row, dict):
-            # dataset row objects can be custom row wrappers in older datasets versions
             row = dict(row)
-
-        if not CommunityForensicsSmallDataset._debug_printed:
-            print(f"[DEBUG] row keys: {list(row.keys())}")
-            CommunityForensicsSmallDataset._debug_printed = True
 
         image = row.get("image")
         if image is None and "img" in row:
@@ -105,14 +111,16 @@ class CommunityForensicsSmallDataset(Dataset):
 
             tensor = _to_tensor(image)
 
+        label = self._extract_label(row)
         return {
             "image": tensor,
-            "label": self._extract_label(row),
+            "label": label,
+            "arch_label": _arch_label(row, label),
+            "domain_label": 0,  # 0=CommFor, 1=aiart
             "meta": self._extract_meta(row, index),
         }
 
 
-# new for debugging  
 class CommunityForensicsSmallIterableDataset(IterableDataset):
     """Iterable wrapper over a Hugging Face streaming CommunityForensics split."""
 
@@ -139,11 +147,9 @@ class CommunityForensicsSmallIterableDataset(IterableDataset):
 
         raw = row.get("label", row.get("target", row.get("y", 0)))
         if isinstance(raw, (bool, int)):
-            print(f"DEBUG raw label (bool/int): {raw} (type: {type(raw).__name__})")
             return int(raw)
         if isinstance(raw, str):
             raw_key = raw.lower()
-            print(f"DEBUG raw label (str): '{raw}' -> '{raw_key}'")
             if raw_key in self.label_map:
                 return int(self.label_map[raw_key])
             if raw_key in {"ai", "synthetic", "fake", "1"}:
@@ -160,19 +166,6 @@ class CommunityForensicsSmallIterableDataset(IterableDataset):
             "generator": row.get("generator"),
             "path": row.get("path"),
         }
-        
-    # # if needed meta data, we can use this to make it String instead of None    
-    # def _extract_meta(self, row: Dict[str, Any], index: int) -> Dict[str, Any]:
-    #     def _s(x, default=""):
-    #         return default if x is None else str(x)
-    
-    #     return {
-    #         "id": _s(row.get("id", row.get("image_id", row.get("image_name", index)))),
-    #         "source_dataset": "CommunityForensics-Small",
-    #         "split": _s(self.split, default=""),
-    #         "generator": _s(row.get("generator", row.get("model_name", ""))),  
-    #         "path": _s(row.get("path", row.get("image_name", ""))),  
-    #     }
 
     def __iter__(self):
         from .transforms import _to_tensor  # local import to avoid cycles
@@ -184,11 +177,6 @@ class CommunityForensicsSmallIterableDataset(IterableDataset):
 
             if not isinstance(row, dict):
                 row = dict(row)
-                
-            # # debugging
-            # if i == 0: 
-            #     print("DEBUG first row keys:", list(row.keys()))
-            #     print("DEBUG first row types:", {k: type(row[k]).__name__ for k in list(row.keys())[:10]})
 
             image = row.get("image")
             if image is None and "img" in row:
@@ -204,8 +192,6 @@ class CommunityForensicsSmallIterableDataset(IterableDataset):
                 
 
             if image is None:
-                # skip bad sample rather than killing the stream
-                print("DEBUG missing image keys present:", list(row.keys()))
                 continue
 
             if hasattr(image, "convert"):
@@ -223,16 +209,12 @@ class CommunityForensicsSmallIterableDataset(IterableDataset):
             else:
                 tensor = _to_tensor(image)
 
-            # yield {
-            #     "image": tensor,
-            #     "label": self._extract_label(row),
-            #     "meta": self._extract_meta(row, i),
-            # }
-            
-            # no need for the meta now for debugging purposes 
+            label = self._extract_label(row)
             yield {
                 "image": tensor,
-                "label": self._extract_label(row),
+                "label": label,
+                "arch_label": _arch_label(row, label),
+                "meta": self._extract_meta(row, i),
             }
-            
+
             i += 1

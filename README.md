@@ -226,10 +226,7 @@ OpenWorld-AI-Image-Detection/
     train_with_dire.py
     calibrate_temperature.py
     build_conformal.py
-    eval_commfor.py
-    eval_vct2.py
-    eval_raid.py
-    eval_aria.py
+    evaluate.py
     make_plots.py
     generate_summary.py
     predict_image.py
@@ -392,10 +389,10 @@ python3 scripts/build_conformal.py \
   --temperature outputs/runs/<run_id>/calibration/temperature.json
 
 # 4. Evaluate
-python3 scripts/eval_commfor.py --config configs/eval_commfor.yaml --run outputs/runs/<run_id> --evaluation-mode all
-python3 scripts/eval_vct2.py --config configs/eval_vct2.yaml --run outputs/runs/<run_id> --evaluation-mode all
-python3 scripts/eval_raid.py --config configs/eval_raid.yaml --run outputs/runs/<run_id> --evaluation-mode all
-python3 scripts/eval_aria.py --config configs/eval_aria.yaml --run outputs/runs/<run_id> --evaluation-mode all
+python3 scripts/evaluate.py --dataset commfor --config configs/eval_commfor.yaml --run outputs/runs/<run_id> --evaluation-mode all
+python3 scripts/evaluate.py --dataset vct2 --config configs/eval_vct2.yaml --run outputs/runs/<run_id> --evaluation-mode all
+python3 scripts/evaluate.py --dataset raid --config configs/eval_raid.yaml --run outputs/runs/<run_id> --evaluation-mode all
+python3 scripts/evaluate.py --dataset aria --config configs/eval_aria.yaml --run outputs/runs/<run_id> --evaluation-mode all
 
 # 5. Plots and summary
 python3 scripts/make_plots.py --runs outputs/runs --out reports/figures --style publication

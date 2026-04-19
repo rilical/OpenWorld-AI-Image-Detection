@@ -15,7 +15,11 @@ src/owaid/data/commfor_small.py
 src/owaid/data/raid.py
 src/owaid/data/transforms.py
 src/owaid/data/vct2.py
+src/owaid/inference/__init__.py
+src/owaid/inference/io.py
+src/owaid/inference/predictor.py
 src/owaid/metrics/__init__.py
+src/owaid/metrics/bootstrap.py
 src/owaid/metrics/calibration_metrics.py
 src/owaid/metrics/classification.py
 src/owaid/metrics/selective.py
@@ -24,9 +28,14 @@ src/owaid/models/abstention.py
 src/owaid/models/clip_detector.py
 src/owaid/models/dire_residual.py
 src/owaid/models/fusion.py
+src/owaid/models/gating.py
+src/owaid/models/pixel_forensic_branch.py
+src/owaid/models/sgf_net.py
+src/owaid/models/spectral_branch.py
 src/owaid/training/__init__.py
 src/owaid/training/checkpoints.py
 src/owaid/training/eval_loop.py
+src/owaid/training/losses.py
 src/owaid/training/train_loop.py
 src/owaid/utils/__init__.py
 src/owaid/utils/config.py
@@ -36,3 +45,4 @@ src/owaid/utils/run.py
 src/owaid/utils/seed.py
 tests/test_conformal.py
 tests/test_metrics.py
+tests/test_predictor.py

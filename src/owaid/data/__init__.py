@@ -11,7 +11,7 @@ from typing import Any, Dict
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import ConcatDataset, DataLoader, Subset, WeightedRandomSampler
 from torch.utils.data.dataloader import default_collate
 
 
@@ -25,6 +25,8 @@ from .commfor_small import CommunityForensicsSmallDataset, CommunityForensicsSma
 from .vct2 import VCT2Dataset
 from .raid import RAIDDataset, RAIDStreamingDataset
 from .aria import ARIADataset
+from .aiart import AIArtDataset, load_aiart_with_split
+from .cifake import CIFAKEDataset
 from .transforms import build_clip_transform
 
 
@@ -337,6 +339,127 @@ def build_commfor_dataloaders(cfg: Any, run_dir: str | None = None) -> Dict[str,
     return loaders
 
 
+def build_mixed_train_dataloader(cfg: Any, run_dir: str | None = None) -> Dict[str, DataLoader]:
+    """Build a 50/50 CommFor + aiart-train mixed training dataloader.
+
+    Returns keys ``"train_fit"``, ``"train"``, ``"cal"``, ``"calibration"`` and
+    (when CommFor exposes a validation split) ``"val"``. The interface matches
+    :func:`build_commfor_dataloaders` so training scripts can swap it in without
+    further changes.
+
+    Mix strategy
+    ------------
+    ``train_fit`` / ``train`` is a :class:`ConcatDataset` of the CommFor
+    training Subset (as produced by :func:`build_commfor_dataloaders`) and the
+    aiart 80%-train Subset produced by
+    :func:`owaid.data.aiart.load_aiart_with_split`. A
+    :class:`WeightedRandomSampler` assigns equal **total** probability mass to
+    each domain, so a batch is ~50/50 CommFor/aiart in expectation. Each sample
+    is tagged with a ``domain_label`` (0=CommFor, 1=aiart) in its dict.
+
+    Calibration
+    -----------
+    ``cal`` / ``calibration`` is the CommFor calibration loader. aiart has no
+    "correct" calibration distribution for CommFor-trained detectors, and we
+    want conformal coverage guarantees on the in-distribution shard.
+
+    Validation
+    ----------
+    ``val`` is the CommFor validation loader (ID val), inherited from
+    :func:`build_commfor_dataloaders` when available.
+    """
+    cfg_dict = _extract_cfg(cfg)
+    data_cfg = cfg_dict.get("data", cfg_dict)
+    if not isinstance(data_cfg, dict):
+        data_cfg = {}
+
+    dataset_name = str(data_cfg.get("dataset", "")).lower()
+    if dataset_name != "commfor_aiart_mix":
+        raise ValueError(
+            "build_mixed_train_dataloader requires data.dataset='commfor_aiart_mix', "
+            f"got {dataset_name!r}"
+        )
+
+    batch_size = int(data_cfg.get("batch_size", 32))
+    num_workers = int(data_cfg.get("num_workers", 2))
+
+    # Delegate to the CommFor builder for the ID pieces. It already handles
+    # stratified splits, calibration, manifest writing, and optional val.
+    commfor_loaders = build_commfor_dataloaders(cfg, run_dir=run_dir)
+
+    # Extract the already-sliced CommFor training Subset.
+    commfor_train_subset = commfor_loaders["train"].dataset
+    if not isinstance(commfor_train_subset, Subset):
+        # Safety net — current build_commfor_dataloaders always returns a Subset.
+        raise RuntimeError(
+            "Expected build_commfor_dataloaders to return a Subset for the train loader; "
+            f"got {type(commfor_train_subset).__name__}"
+        )
+
+    # Build the aiart 80% train shard with the same CLIP training transforms.
+    train_transform = build_clip_transform(cfg_dict, train=True)
+    aiart_train_dataset = load_aiart_with_split("train", transform=train_transform)
+
+    n_commfor = len(commfor_train_subset)
+    n_aiart = len(aiart_train_dataset)
+    if n_commfor == 0 or n_aiart == 0:
+        raise ValueError(
+            f"Empty shard in mixed dataloader (n_commfor={n_commfor}, n_aiart={n_aiart})."
+        )
+
+    # Equal total probability mass per domain: each CommFor sample gets 1/n_commfor
+    # and each aiart sample gets 1/n_aiart (summing to 1.0 per domain).
+    weights = torch.cat(
+        [
+            torch.full((n_commfor,), 1.0 / n_commfor, dtype=torch.double),
+            torch.full((n_aiart,), 1.0 / n_aiart, dtype=torch.double),
+        ]
+    )
+    sampler = WeightedRandomSampler(
+        weights=weights,
+        num_samples=n_commfor + n_aiart,
+        replacement=True,
+    )
+
+    mixed_train_dataset = ConcatDataset([commfor_train_subset, aiart_train_dataset])
+    mixed_train_loader = DataLoader(
+        mixed_train_dataset,
+        batch_size=batch_size,
+        sampler=sampler,
+        num_workers=max(0, num_workers),
+        pin_memory=torch.cuda.is_available(),
+        drop_last=False,
+        collate_fn=_collate_skip_none,
+    )
+
+    loaders: Dict[str, DataLoader] = {
+        "train_fit": mixed_train_loader,
+        "train": mixed_train_loader,
+        "cal": commfor_loaders["cal"],
+        "calibration": commfor_loaders["calibration"],
+    }
+    if "val" in commfor_loaders:
+        loaders["val"] = commfor_loaders["val"]
+
+    return loaders
+
+
+def build_train_dataloaders(cfg: Any, run_dir: str | None = None) -> Dict[str, DataLoader]:
+    """Dispatch to the correct training dataloader builder based on ``data.dataset``.
+
+    - ``commfor_small`` -> :func:`build_commfor_dataloaders`
+    - ``commfor_aiart_mix`` -> :func:`build_mixed_train_dataloader`
+    """
+    cfg_dict = _extract_cfg(cfg)
+    data_cfg = cfg_dict.get("data", cfg_dict) if isinstance(cfg_dict, dict) else {}
+    name = str(data_cfg.get("dataset", "commfor_small")).lower() if isinstance(data_cfg, dict) else "commfor_small"
+    if name == "commfor_small":
+        return build_commfor_dataloaders(cfg, run_dir=run_dir)
+    if name == "commfor_aiart_mix":
+        return build_mixed_train_dataloader(cfg, run_dir=run_dir)
+    raise ValueError(f"Unknown training dataset: {name!r}")
+
+
 def build_eval_dataloader(cfg: Any, dataset_name: str) -> DataLoader:
     """Build an evaluation dataloader for the requested dataset."""
     cfg_dict = _extract_cfg(cfg)
@@ -381,6 +504,27 @@ def build_eval_dataloader(cfg: Any, dataset_name: str) -> DataLoader:
             dataset = RAIDDataset(split=data_cfg.get("split", "test"), transform=transform, data_root=data_cfg.get("raid_root"))
     elif name == "aria":
         dataset = ARIADataset(split=data_cfg.get("split", "test"), transform=transform, data_root=data_cfg.get("aria_root"))
+    elif name in {"aiart", "ai_art"}:
+        aiart_split = data_cfg.get("split")
+        if aiart_split in {"train", "test"}:
+            dataset = load_aiart_with_split(aiart_split, transform=transform)
+        else:
+            from datasets import load_dataset
+            ds = load_dataset("Hemg/AI-Generated-vs-Real-Images-Datasets", split="train")
+            if max_eval_samples is not None and max_eval_samples < len(ds):
+                rng = np.random.default_rng(seed)
+                subset_idx = rng.choice(len(ds), size=max_eval_samples, replace=False)
+                ds = ds.select(subset_idx.tolist())
+            dataset = AIArtDataset(ds, transform=transform, split="train")
+    elif name in {"cifake"}:
+        from datasets import load_dataset
+        split = data_cfg.get("split", "test")
+        ds = load_dataset("dragonintelligence/CIFAKE-image-dataset", split=split)
+        if max_eval_samples is not None and max_eval_samples < len(ds):
+            rng = np.random.default_rng(seed)
+            subset_idx = rng.choice(len(ds), size=max_eval_samples, replace=False)
+            ds = ds.select(subset_idx.tolist())
+        dataset = CIFAKEDataset(ds, transform=transform, split=split)
     else:
         raise ValueError(f"Unknown dataset_name: {dataset_name}")
 
@@ -410,6 +554,8 @@ def build_aria_dataloader(cfg: Any) -> DataLoader:
 
 __all__ = [
     "build_commfor_dataloaders",
+    "build_mixed_train_dataloader",
+    "build_train_dataloaders",
     "build_eval_dataloader",
     "build_vct2_dataloader",
     "build_raid_dataloader",
@@ -417,5 +563,8 @@ __all__ = [
     "CommunityForensicsSmallDataset",
     "VCT2Dataset",
     "RAIDDataset",
+    "AIArtDataset",
     "ARIADataset",
+    "CIFAKEDataset",
+    "load_aiart_with_split",
 ]

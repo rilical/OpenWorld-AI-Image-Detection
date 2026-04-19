@@ -1,0 +1,15 @@
+seed: 123
+deterministic: true
+
+data:
+  dataset: "aiart"
+  split: "test"
+  batch_size: 64
+  num_workers: 0
+  img_size: 224
+
+eval:
+  save_predictions: true
+
+output:
+  root: "outputs/runs"

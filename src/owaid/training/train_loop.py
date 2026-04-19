@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Tuple
 
 import torch
+import torch.nn.functional as F
 from tqdm import tqdm
 
 from ..metrics.classification import auroc, tpr_at_fpr
@@ -25,13 +26,16 @@ def train_one_epoch(
     epoch: int = 0,
     global_step: int = 0,
     max_steps: int | None = None,
+    total_steps: int | None = None,
 ) -> Tuple[float, int]:
     """Train for one epoch and return average loss plus updated global step."""
-    import itertools
+    import itertools  # stdlib; inline to avoid top-level import for optional feature
     model.train()
     optimizer.zero_grad(set_to_none=True)
     scaler = torch.cuda.amp.GradScaler(enabled=amp and device.startswith("cuda"))
     step_losses = []
+
+    dat_active = hasattr(model, "set_lambda")
 
     iterable = itertools.islice(loader, max_steps) if max_steps is not None else loader
     for batch_idx, batch in enumerate(tqdm(iterable, desc="train", leave=False, total=max_steps)):
@@ -40,9 +44,26 @@ def train_one_epoch(
         images = batch["image"].to(device)
         labels = batch["label"].to(device)
 
+        # Ramp DAT gradient-reversal strength linearly from 0 to model.max_lambda.
+        if dat_active and total_steps is not None and total_steps > 0:
+            progress = min(1.0, float(global_step) / float(total_steps))
+            lam = progress * float(getattr(model, "max_lambda", 0.0))
+            model.set_lambda(lam)
+
+        domain_loss_val: float | None = None
         with torch.autocast(device_type="cuda", enabled=amp and device.startswith("cuda")):
             out = model(images)
             raw_loss = criterion(out["logits"], labels)
+            if (
+                dat_active
+                and isinstance(out, dict)
+                and "domain_logits" in out
+                and "domain_label" in batch
+            ):
+                domain_labels = batch["domain_label"].to(device)
+                domain_loss = F.cross_entropy(out["domain_logits"], domain_labels)
+                raw_loss = raw_loss + domain_loss
+                domain_loss_val = float(domain_loss.item())
             loss = raw_loss / max(1, grad_accum_steps)
 
         if scaler.is_enabled():
@@ -62,15 +83,18 @@ def train_one_epoch(
         global_step += 1
         step_losses.append(float(raw_loss.item()))
         if logger is not None:
-            logger.log(
-                {
-                    "split": "train_step",
-                    "epoch": epoch,
-                    "global_step": global_step,
-                    "loss": float(raw_loss.item()),
-                    "lr": float(optimizer.param_groups[0]["lr"]),
-                }
-            )
+            log_entry: Dict[str, Any] = {
+                "split": "train_step",
+                "epoch": epoch,
+                "global_step": global_step,
+                "loss": float(raw_loss.item()),
+                "lr": float(optimizer.param_groups[0]["lr"]),
+            }
+            if dat_active:
+                log_entry["lambda"] = float(getattr(model, "_current_lambda", 0.0))
+                if domain_loss_val is not None:
+                    log_entry["domain_loss"] = domain_loss_val
+            logger.log(log_entry)
 
     avg_loss = float(sum(step_losses) / max(1, len(step_losses)))
     return avg_loss, global_step
@@ -139,7 +163,15 @@ def run_training(
         lr=lr,
         weight_decay=weight_decay,
     )
-    criterion = torch.nn.CrossEntropyLoss()
+
+    # Support pluggable loss function via config
+    loss_type = train_cfg.get("loss", "cross_entropy")
+    if loss_type == "sgf_net":
+        from .losses import SGFNetLoss
+        lambda_conf = float(train_cfg.get("lambda_conf", 0.3))
+        criterion = SGFNetLoss(lambda_conf=lambda_conf)
+    else:
+        criterion = torch.nn.CrossEntropyLoss()
 
     global_step = 0
     best_epoch = None
@@ -147,9 +179,6 @@ def run_training(
     best_path = Path(run_dir) / "checkpoints" / "best.pt"
     last_path = Path(run_dir) / "checkpoints" / "last.pt"
     best_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    # new for debugging
-    metric_key = cfg.get("train", {}).get("best_metric", "auroc")
 
     if resume_from:
         state = load_checkpoint(str(resume_from), model, optimizer=optimizer)
@@ -162,6 +191,16 @@ def run_training(
         print(f"[GPU] Memory reserved:  {torch.cuda.memory_reserved(0) / 1e6:.1f} MB")
     else:
         print("[GPU] CUDA not available — running on CPU")
+
+    # Estimate total optimization steps for the DAT lambda ramp. When
+    # steps_per_epoch is unset we fall back to len(train_loader); if that fails
+    # (e.g., streaming loaders), total_steps stays None and the wrapper simply
+    # keeps lambda at its last-set value (0 by default).
+    try:
+        per_epoch = int(steps_per_epoch) if steps_per_epoch is not None else len(train_loader)
+    except TypeError:
+        per_epoch = 0
+    total_steps = epochs * per_epoch if per_epoch > 0 else None
 
     for epoch in range(start_epoch, epochs):
         train_loss, global_step = train_one_epoch(
@@ -176,6 +215,7 @@ def run_training(
             epoch=epoch,
             global_step=global_step,
             max_steps=steps_per_epoch,
+            total_steps=total_steps,
         )
         logger.log(
             {
@@ -186,17 +226,21 @@ def run_training(
             }
         )
 
-        current_metric = train_loss
         val_metrics = None
         if val_loader is not None:
             val_metrics = validate(model, val_loader, device, criterion)
             val_metrics.update({"epoch": epoch, "split": "val"})
             logger.log(val_metrics)
             current_metric = float(val_metrics.get(metric_key, -1e9))
+            is_better = current_metric > best_metric
+        else:
+            # No val loader: use train loss. Lower is better, so invert sign.
+            current_metric = -train_loss
+            is_better = current_metric > best_metric
 
         save_checkpoint(str(last_path), model, optimizer, epoch, global_step, cfg)
 
-        if current_metric > best_metric:
+        if is_better:
             best_metric = current_metric
             best_epoch = epoch
             no_improve_epochs = 0

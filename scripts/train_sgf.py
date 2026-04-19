@@ -1,4 +1,4 @@
-"""Train CLIP baseline binary detector."""
+"""Train SGF-Net: Spectral-Gated Forensic Fusion Network."""
 
 from __future__ import annotations
 
@@ -36,31 +36,20 @@ from owaid.utils import (
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train the baseline CLIP detector")
-    parser.add_argument("--config", required=True)
+    parser = argparse.ArgumentParser(description="Train SGF-Net detector")
+    parser.add_argument("--config", default="configs/sgf_net.yaml")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--validate-only", action="store_true")
     parser.add_argument("--opts", nargs="*")
     return parser.parse_args()
 
 
-def _validate_config(cfg: dict) -> None:
-    required = ["data", "model", "train", "output"]
-    missing = [key for key in required if key not in cfg]
-    if missing:
-        raise ValueError(f"Missing required config sections: {missing}")
-    dataset_name = cfg.get("data", {}).get("dataset")
-    if dataset_name not in {"commfor_small", "commfor_aiart_mix"}:
-        raise ValueError(
-            "train_baseline.py requires data.dataset in "
-            f"{{'commfor_small', 'commfor_aiart_mix'}}, got {dataset_name!r}"
-        )
-
-
 def main() -> None:
     args = parse_args()
     cfg = merge_cli_overrides(load_yaml(args.config), args.opts)
-    _validate_config(cfg)
+
+    if cfg.get("model", {}).get("type") != "sgf_net":
+        raise ValueError("train_sgf.py requires model.type=sgf_net")
 
     if args.validate_only:
         print("Config validation OK")
@@ -76,6 +65,14 @@ def main() -> None:
 
     dataloaders = build_train_dataloaders(cfg, run_dir=run_dir)
     model = build_model_from_config(cfg).to(args.device)
+
+    # Print model summary
+    total = sum(p.numel() for p in model.parameters())
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"[SGF-Net] Total params: {total:,}")
+    print(f"[SGF-Net] Trainable params: {trainable:,}")
+    print(f"[SGF-Net] Frozen params: {total - trainable:,}")
+
     logger = JsonlLogger(str(Path(run_dir) / "logs" / "train.jsonl"))
     summary = run_training(
         cfg,
@@ -87,7 +84,8 @@ def main() -> None:
         logger=logger,
     )
     write_json(str(Path(run_dir) / "train_summary.json"), summary)
-    print(run_dir)
+    print(f"[SGF-Net] Training complete. Run dir: {run_dir}")
+    print(f"[SGF-Net] Best {summary['best_metric_name']}: {summary['best_metric']:.4f} @ epoch {summary['best_epoch']}")
 
 
 if __name__ == "__main__":

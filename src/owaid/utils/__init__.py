@@ -1,12 +1,10 @@
 """Public utility helpers for Open‑World AI image detection."""
 
 from .config import (
-    add_config_args,
     deep_update,
     load_yaml,
     merge_cli_overrides,
     namespace_to_dict,
-    parse_kwargs_to_dict,
     parse_overrides,
     resolve_config,
     to_namespace,
@@ -23,9 +21,7 @@ __all__ = [
     "resolve_config",
     "to_namespace",
     "merge_cli_overrides",
-    "parse_kwargs_to_dict",
     "namespace_to_dict",
-    "add_config_args",
     "require_env",
     "ensure_dir",
     "resolve_path",

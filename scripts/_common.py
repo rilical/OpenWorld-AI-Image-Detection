@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import platform
+import socket
+import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
@@ -18,6 +22,30 @@ from owaid.training import evaluate_model
 from owaid.utils.config import deep_update, load_yaml, merge_cli_overrides
 from owaid.utils.logging import JsonlLogger, write_json
 from owaid.utils.paths import make_run_dir
+
+
+def git_hash() -> str:
+    """Return short git hash of HEAD, or 'unknown' if unavailable."""
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], text=True
+        ).strip()
+    except Exception:
+        return "unknown"
+
+
+def build_script_meta(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Build standard metadata dict for script artifacts."""
+    import torch
+
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "git_hash": git_hash(),
+        "hostname": socket.gethostname(),
+        "platform": platform.platform(),
+        "seed": cfg.get("seed", 0),
+        "torch_version": torch.__version__,
+    }
 
 
 def load_config_with_overrides(

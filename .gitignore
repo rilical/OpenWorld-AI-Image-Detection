@@ -17,6 +17,11 @@ venv/
 outputs/runs/*
 outputs/plots/*
 outputs/tables/*
+outputs/*.log
+outputs/*.out
+outputs/*_slurm_*.out
+outputs/slurm-*.out
+outputs/splits/
 !outputs/runs/.gitkeep
 !outputs/plots/.gitkeep
 !outputs/tables/.gitkeep
@@ -36,3 +41,6 @@ data/*
 # IDE
 .vscode/
 .idea/
+
+# Local tool state
+.claude/

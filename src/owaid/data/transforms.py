@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import random
 from typing import Any, Callable, Dict
 
 import numpy as np
@@ -64,6 +65,41 @@ def _jpeg_quality_transform(quality: int | None) -> Callable[[Image.Image], Imag
     return _fn
 
 
+class RandomJPEGCompression:
+    """Randomly re-encode a PIL image as JPEG at a random quality.
+
+    With probability ``p``, the image is re-encoded at a quality drawn
+    uniformly from ``[quality_range[0], quality_range[1]]``. Uses Python's
+    ``random`` module (consistent with torchvision transforms) so global
+    seeding via ``set_seed`` carries over.
+    """
+
+    def __init__(self, p: float = 0.7, quality_range: tuple[int, int] = (60, 95)) -> None:
+        lo, hi = int(quality_range[0]), int(quality_range[1])
+        if lo > hi:
+            lo, hi = hi, lo
+        self.p = float(p)
+        self.quality_lo = max(1, min(100, lo))
+        self.quality_hi = max(1, min(100, hi))
+
+    def __call__(self, img: Image.Image) -> Image.Image:
+        if random.random() >= self.p:
+            return img
+        quality = random.randint(self.quality_lo, self.quality_hi)
+        buffer = io.BytesIO()
+        rgb = img if img.mode == "RGB" else img.convert("RGB")
+        rgb.save(buffer, format="JPEG", quality=int(quality))
+        buffer.seek(0)
+        with Image.open(buffer) as decoded:
+            return decoded.convert("RGB")
+
+    def __repr__(self) -> str:  # pragma: no cover - debug aid
+        return (
+            f"{self.__class__.__name__}(p={self.p}, "
+            f"quality_range=({self.quality_lo}, {self.quality_hi}))"
+        )
+
+
 def _gaussian_blur_transform(sigma: float | None) -> Callable[[Image.Image], Image.Image] | None:
     """Create a PIL gaussian blur transform."""
     if sigma is None:
@@ -102,11 +138,31 @@ def _get_model_norm(cfg_dict: Dict[str, Any]) -> tuple[list[float], list[float]]
 def build_clip_transform(cfg: Any, train: bool) -> Callable[[Any], Tensor]:
     """Build a CLIP-compatible transform pipeline.
 
+    When ``train=True`` and ``data.transforms.tier1.enabled`` is set, a
+    "Tier-1 bias-removal" augmentation pipeline is prepended before
+    ``ToTensor``/``Normalize``:
+
+        RandomJPEGCompression -> RandomResizedCrop -> ColorJitter
+
+    Tier-1 replaces the terminal ``Resize((img_size, img_size))`` with
+    ``RandomResizedCrop(img_size, scale=tier1.resized_crop_scale)``. The
+    eval path (``train=False``) and the default (tier1 absent / disabled)
+    are unchanged.
+
     Examples
     --------
     >>> cfg = {"data": {"img_size": 224, "transforms": {"resize_shorter": 224}}, "deterministic": True}
     >>> tx = build_clip_transform(cfg, train=False)
     >>> hasattr(tx, "__call__")
+    True
+    >>> tier1_cfg = {
+    ...     "data": {
+    ...         "img_size": 224,
+    ...         "transforms": {"tier1": {"enabled": True}},
+    ...     }
+    ... }
+    >>> tx_train = build_clip_transform(tier1_cfg, train=True)
+    >>> hasattr(tx_train, "__call__")
     True
     """
     cfg_dict = cfg if isinstance(cfg, dict) else vars(cfg)
@@ -126,11 +182,43 @@ def build_clip_transform(cfg: Any, train: bool) -> Callable[[Any], Tensor]:
     jpeg_quality = transform_cfg.get("jpeg_quality")
     blur_sigma = transform_cfg.get("blur_sigma")
 
+    tier1_cfg = transform_cfg.get("tier1", {}) if isinstance(transform_cfg, dict) else {}
+    if not isinstance(tier1_cfg, dict):
+        tier1_cfg = {}
+    tier1_enabled = bool(tier1_cfg.get("enabled", False)) and bool(train)
+
     mean, std = _get_model_norm(cfg_dict)
 
     steps: list[Callable[[Any], Any]] = []
 
-    if resize_shorter is not None:
+    # Tier-1 runs BEFORE the terminal resize and operates on PIL images.
+    # Order: RandomJPEGCompression -> RandomResizedCrop -> ColorJitter.
+    # When active, RandomResizedCrop replaces the terminal Resize(img_size).
+    if tier1_enabled:
+        jpeg_prob = float(tier1_cfg.get("jpeg_prob", 0.7))
+        jpeg_quality_range = tier1_cfg.get("jpeg_quality_range", [60, 95])
+        if not isinstance(jpeg_quality_range, (list, tuple)) or len(jpeg_quality_range) != 2:
+            jpeg_quality_range = [60, 95]
+        steps.append(
+            RandomJPEGCompression(
+                p=jpeg_prob,
+                quality_range=(int(jpeg_quality_range[0]), int(jpeg_quality_range[1])),
+            )
+        )
+
+        resized_crop_scale = tier1_cfg.get("resized_crop_scale", [0.7, 1.0])
+        if not isinstance(resized_crop_scale, (list, tuple)) or len(resized_crop_scale) != 2:
+            resized_crop_scale = [0.7, 1.0]
+        steps.append(
+            transforms.RandomResizedCrop(
+                img_size,
+                scale=(float(resized_crop_scale[0]), float(resized_crop_scale[1])),
+            )
+        )
+
+        cj = float(tier1_cfg.get("color_jitter", 0.1))
+        steps.append(transforms.ColorJitter(brightness=cj, contrast=cj, saturation=cj))
+    elif resize_shorter is not None:
         side = int(resize_shorter)
         steps.append(transforms.Resize((side, side)))
         if center_crop:

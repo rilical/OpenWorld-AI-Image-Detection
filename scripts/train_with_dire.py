@@ -14,7 +14,7 @@ from _bootstrap import bootstrap_repo_source
 
 bootstrap_repo_source()
 
-from owaid.data import build_commfor_dataloaders
+from owaid.data import build_train_dataloaders
 from owaid.inference import build_model_from_config
 from owaid.training import run_training
 from owaid.utils import (
@@ -65,7 +65,7 @@ def main() -> None:
     save_resolved_config(run_dir, cfg)
     write_meta(run_dir, cfg)
 
-    dataloaders = build_commfor_dataloaders(cfg, run_dir=run_dir)
+    dataloaders = build_train_dataloaders(cfg, run_dir=run_dir)
     model = build_model_from_config(cfg).to(args.device)
     logger = JsonlLogger(str(Path(run_dir) / "logs" / "train.jsonl"))
     summary = run_training(

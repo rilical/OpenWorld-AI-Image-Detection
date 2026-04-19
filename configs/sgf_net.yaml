@@ -25,18 +25,19 @@ data:
     center_crop: true
 
 model:
-  type: "clip_dire_fusion"
+  type: "sgf_net"
   clip:
     model_name: "ViT-B-32"
     pretrained: "openai"
     freeze: true
-    unfreeze_last_n: 0
   head:
-    hidden_dims: [256, 128]
+    hidden_dims: [128]
     dropout: 0.1
-  dire:
-    enabled: true
-    cache_dir: "outputs/runs/dire_cache"
+  sgf:
+    spectral_dim: 128
+    pixel_dim: 128
+    fused_dim: 256
+    head_hidden_dims: [128]
 
 train:
   epochs: 30
@@ -46,6 +47,8 @@ train:
   amp: false
   grad_accum_steps: 1
   best_metric: "auroc"
+  loss: "sgf_net"
+  lambda_conf: 0.3
 
 calibration:
   temperature: true
